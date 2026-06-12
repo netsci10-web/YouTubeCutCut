@@ -1,13 +1,34 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#020617" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="YouTube CutCut" />
+    
+    <!-- SVG Favicon / Icon link representing CutCut -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='192' height='192' viewBox='0 0 192 192'><rect width='192' height='192' rx='42' fill='%23020617'/><path d='M60 50l90 46-90 46V50z' fill='%2310b981'/><circle cx='96' cy='96' r='76' fill='none' stroke='%230ea5e9' stroke-width='8'/></svg>" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='192' height='192' viewBox='0 0 192 192'><rect width='192' height='192' rx='42' fill='%23020617'/><path d='M60 50l90 46-90 46V50z' fill='%2310b981'/><circle cx='96' cy='96' r='76' fill='none' stroke='%230ea5e9' stroke-width='8'/></svg>" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <title>YouTube CutCut - 유튜브 구간 반복 학습기</title>
   </head>
-  <body>
+  <body class="bg-slate-950 text-slate-100 selection:bg-emerald-500/20 selection:text-emerald-300 antialiased overscroll-y-none">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+
+    <!-- Register service worker safely -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(reg => console.log('ServiceWorker registered:', reg.scope))
+            .catch(err => console.error('ServiceWorker registration failed:', err));
+        });
+      }
+    </script>
   </body>
 </html>
 

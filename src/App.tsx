@@ -4,8 +4,9 @@ import { WaveformTimeline } from "./components/WaveformTimeline";
 import { HotkeySettings } from "./components/HotkeySettings";
 import { BookmarkManager } from "./components/BookmarkManager";
 import { 
-  Play, Pause, RotateCw, SkipBack, SkipForward, Flame, Keyboard, Info, Check, AlertCircle,
-  HelpCircle, Sparkles, Sliders, Volume2, Globe, Music, GraduationCap, Monitor
+  Play, Pause, Square, RotateCw, SkipBack, SkipForward, Flame, Keyboard, Info, Check, AlertCircle,
+  HelpCircle, Sparkles, Sliders, Volume2, Globe, Music, GraduationCap, Monitor, Search, Loader2,
+  Plus, Download, Upload
 } from "lucide-react";
 
 // Standard YouTube URL extractor
@@ -86,6 +87,19 @@ export default function App() {
   const [loopActive, setLoopActive] = useState(true);
   const [startTime, setStartTime] = useState(10);
   const [endTime, setEndTime] = useState(40);
+  const [isStartSet, setIsStartSet] = useState(false);
+  const [isEndSet, setIsEndSet] = useState(false);
+
+  const updateStartTime = (val: number) => {
+    setStartTime(val);
+    setIsStartSet(true);
+  };
+
+  const updateEndTime = (val: number) => {
+    setEndTime(val);
+    setIsEndSet(true);
+  };
+
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -106,12 +120,40 @@ export default function App() {
   const loopIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const cooldownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const feedbackTimeoutRef = useRef<number | null>(null);
+  const skipInitialResetRef = useRef<boolean>(false);
 
   // --- Popout Mode Management for Second Monitor Fullscreen ---
   const popoutWindowRef = useRef<Window | null>(null);
   const [popoutActive, setPopoutActive] = useState(false);
   const [playerSize, setPlayerSize] = useState<number>(100); // Main video player size percent (50% to 100%)
   const [isPlayerReady, setIsPlayerReady] = useState(false);
+
+  // --- YouTube Search States ---
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  const handleYoutubeSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) return;
+
+    setIsSearching(true);
+    setSearchError(null);
+    try {
+      const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(query)}`);
+      if (!response.ok) {
+        throw new Error("유튜브 검색 결과가 존재하지 않거나 일시적 오류입니다.");
+      }
+      const data = await response.json();
+      setSearchResults(data.items || []);
+    } catch (err: any) {
+      setSearchError(err.message || "유튜브 검색 중 오류가 발생했습니다.");
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   // Listen for real-time playhead/status feedbacks from Popout Sub-window
   useEffect(() => {
@@ -255,8 +297,16 @@ export default function App() {
         });
 
         // Initialize markers
-        setStartTime(0);
-        setEndTime(data.duration || 300);
+        if (skipInitialResetRef.current) {
+          skipInitialResetRef.current = false;
+          setIsStartSet(true);
+          setIsEndSet(true);
+        } else {
+          setStartTime(0);
+          setEndTime(data.duration || 300);
+          setIsStartSet(false);
+          setIsEndSet(false);
+        }
       } catch (err: any) {
         console.warn("Could not fetch video meta securely:", err.message);
         // Fallback gracefully using live iframe metrics later
@@ -269,8 +319,16 @@ export default function App() {
           loading: false,
           error: "API Key Metadata fallback"
         });
-        setStartTime(0);
-        setEndTime(300);
+        if (skipInitialResetRef.current) {
+          skipInitialResetRef.current = false;
+          setIsStartSet(true);
+          setIsEndSet(true);
+        } else {
+          setStartTime(0);
+          setEndTime(300);
+          setIsStartSet(false);
+          setIsEndSet(false);
+        }
       }
     };
 
@@ -303,7 +361,7 @@ export default function App() {
           setCurrentTime(time);
 
           // Loop repeat check bounding
-          if (loopActive && time >= endTime) {
+          if (loopActive && isEndSet && time >= endTime) {
             handleRepeatReset();
           }
         }
@@ -448,12 +506,26 @@ export default function App() {
             setEndTime(duration);
           }
 
-          // 영상을 플레이하여 즉각적인 상태로 만든 전, 곧장 정지하여 즉시 대기 반응 상태로 진입하게 함
-          event.target.playVideo();
+          // 항상 오토플레이를 구현하기 위해 우선 mute한 다음 플레이 및 탐색(seekTo) 시그널을 강제로 보내고,
+          // 그 뒤 즉각적인 일시정지(pauseVideo) 및 unmute를 실행하여 비디오를 활성화 & 대기 상태로 맞춥니다.
+          try {
+            event.target.mute();
+            event.target.seekTo(startTime, true);
+            event.target.playVideo();
+          } catch (e) {}
+
           setTimeout(() => {
             try {
-              if (playerRef.current && typeof playerRef.current.pauseVideo === "function") {
-                playerRef.current.pauseVideo();
+              if (event.target) {
+                if (typeof event.target.pauseVideo === "function") {
+                  event.target.pauseVideo();
+                }
+                if (typeof event.target.seekTo === "function") {
+                  event.target.seekTo(startTime, true);
+                }
+                if (typeof event.target.unmute === "function") {
+                  event.target.unmute();
+                }
               }
             } catch (e) {}
             setIsPlaying(false);
@@ -585,12 +657,12 @@ export default function App() {
       } else if (key === hotkeys.setStart) {
         e.preventDefault();
         const current = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
-        setStartTime(Math.max(0, Math.min(current, endTime - 0.2)));
+        updateStartTime(Math.max(0, Math.min(current, endTime - 0.2)));
         showTemporaryNotification(`구간 시작점 (A) 지정 완료: ${formatTimeAsSeconds(current)} 📍`);
       } else if (key === hotkeys.setEnd) {
         e.preventDefault();
         const current = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
-        setEndTime(Math.max(startTime + 0.2, Math.min(current, videoMeta.duration)));
+        updateEndTime(Math.max(startTime + 0.2, Math.min(current, videoMeta.duration)));
         showTemporaryNotification(`구간 끝나는점 (B) 지정 완료: ${formatTimeAsSeconds(current)} 📍`);
       } else if (key === hotkeys.loopToggle) {
         e.preventDefault();
@@ -617,12 +689,12 @@ export default function App() {
       } else if (key === hotkeys.captureStart) {
         e.preventDefault();
         const current = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
-        setStartTime(current);
+        updateStartTime(current);
         showTemporaryNotification(`원터치 시작캡처 [S] 성공: ${formatTimeAsSeconds(current)} (여기!)`);
       } else if (key === hotkeys.captureEnd) {
         e.preventDefault();
         const current = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
-        setEndTime(current);
+        updateEndTime(current);
         showTemporaryNotification(`원터치 종료캡처 [E] 성공: ${formatTimeAsSeconds(current)} (여기!)`);
       }
     };
@@ -677,15 +749,18 @@ export default function App() {
     showTemporaryNotification("폴더삭제 완료 (안의 구간들은 미분류 이동)");
   };
 
-  const handleSelectBookmark = (bm: Bookmark) => {
+  const handleSelectBookmark = (bm: Bookmark, autoPlay?: boolean) => {
     // If different video, swap sources first
     if (bm.videoId !== activeVideoId) {
+      skipInitialResetRef.current = true;
       setActiveVideoId(bm.videoId);
     }
     
     // Set parameters
     setStartTime(bm.startTime);
     setEndTime(bm.endTime);
+    setIsStartSet(true);
+    setIsEndSet(true);
     setLoopActive(true);
     setPlaybackSpeed(bm.speed);
     
@@ -693,13 +768,98 @@ export default function App() {
       playerRef.current.setPlaybackRate(bm.speed);
     }
     handleSeekToTime(bm.startTime);
+
+    if (playerRef.current && iframeReadyRef.current) {
+      try {
+        if (autoPlay) {
+          playerRef.current.playVideo();
+          setIsPlaying(true);
+        } else {
+          playerRef.current.pauseVideo();
+          setIsPlaying(false);
+        }
+      } catch (e) {}
+    } else {
+      // If player is not initialized yet or loading, respect the intent
+      setIsPlaying(!!autoPlay);
+    }
     
     showTemporaryNotification(`'${bm.title}' 구간을 원 버튼으로 로드했습니다 ⚡`);
+  };
+
+  const handleUpdateBookmark = (id: string, updatedFields: Partial<Bookmark>) => {
+    setBookmarks((prev) =>
+      prev.map((bm) => (bm.id === id ? { ...bm, ...updatedFields } : bm))
+    );
+    showTemporaryNotification("구간 정보가 성공적으로 수정되었습니다! 📁");
   };
 
   const handleImportData = (newBms: Bookmark[], newFolders: Folder[]) => {
     if (newBms.length > 0) setBookmarks(newBms);
     if (newFolders.length > 0) setFolders(newFolders);
+  };
+
+  const handleQuickAddBookmark = () => {
+    if (!activeVideoId) {
+      showTemporaryNotification("활성화된 유튜브 동영상이 없습니다 📺");
+      return;
+    }
+    const defaultName = `${videoMeta.title !== "구간 반복을 진행할 유튜브 영상을 불러와 주세요" ? videoMeta.title : "새 반복 구간"} (${formatTimeAsSeconds(startTime)} ~ ${formatTimeAsSeconds(endTime)})`;
+    
+    handleAddBookmark({
+      title: defaultName,
+      videoId: activeVideoId,
+      videoTitle: videoMeta.title !== "구간 반복을 진행할 유튜브 영상을 불러와 주세요" ? videoMeta.title : undefined,
+      channelName: (videoMeta.channelTitle && videoMeta.channelTitle !== "채널명 없음" && videoMeta.channelTitle !== "유튜브 채널 정보") ? videoMeta.channelTitle : undefined,
+      startTime,
+      endTime,
+      speed: playbackSpeed,
+      notes: "빠른 추가 구간",
+      tags: [],
+      folderId: ""
+    });
+  };
+
+  const handleQuickExportBookmarks = () => {
+    const dataToExport = {
+      bookmarks,
+      folders,
+      version: "1.0",
+      exportDate: Date.now(),
+    };
+    const blog = new Blob([JSON.stringify(dataToExport, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blog);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `youtube_loop_bookmarks_${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showTemporaryNotification("구간 백업 파일이 내보내기 되었습니다! 💾");
+  };
+
+  const handleQuickImportBookmarks = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+         const json = JSON.parse(evt.target?.result as string);
+         if (Array.isArray(json.bookmarks) && Array.isArray(json.folders)) {
+           handleImportData(json.bookmarks, json.folders);
+           showTemporaryNotification(`백업 로드 완료! (구간: ${json.bookmarks.length}개) 📂`);
+         } else if (Array.isArray(json)) {
+           handleImportData(json, []);
+           showTemporaryNotification(`백업 로드 완료! (구간: ${json.length}개) 📂`);
+         } else {
+           alert("올바르지 않은 백업 파일 포맷입니다.");
+         }
+      } catch (err) {
+         alert("JSON 파일 파싱 중 오류가 발생했습니다.");
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -939,7 +1099,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={togglePopoutMode}
-                      className="mt-4 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-550 text-white rounded-lg text-xs font-bold shadow-lg shadow-indigo-600/20 transition-all cursor-pointer"
+                      className="mt-4 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-555 text-white rounded-lg text-xs font-bold shadow-lg shadow-indigo-600/20 transition-all cursor-pointer"
                     >
                       전송 종료 및 메인 화면으로 비디오 회수
                     </button>
@@ -968,239 +1128,282 @@ export default function App() {
               currentTime={currentTime}
               startTime={startTime}
               endTime={endTime}
-              onChangeStart={setStartTime}
-              onChangeEnd={setEndTime}
+              onChangeStart={updateStartTime}
+              onChangeEnd={updateEndTime}
               onSeek={(sec) => {
                 handleSeekToTime(sec);
               }}
               videoId={activeVideoId}
+              isStartSet={isStartSet}
+              isEndSet={isEndSet}
             />
 
             {/* Quick Micro Adjusters for Start & End Ranges */}
-            <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4 items-stretch">
               
               {/* Range A Set Deck */}
-              <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
-                    🟢 시작점 지정 (A)
-                  </span>
-                  <button
-                    onClick={() => {
-                      const current = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
-                      setStartTime(Math.max(0, Math.min(current, endTime - 0.2)));
-                      showTemporaryNotification("현시점을 시작점(A)에 담았습니다 📍");
-                    }}
-                    type="button"
-                    title="현재 플레이어 시점 입력"
-                    className="text-[10.5px] text-emerald-300 font-semibold flex items-center gap-0.5 bg-emerald-500/15 hover:bg-emerald-500/30 px-2 py-0.5 rounded border border-emerald-500/20 transition-colors"
-                  >
-                     현시점으로 캡처 [Q]
-                  </button>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max={endTime - 0.2}
-                    value={startTime.toFixed(1)}
-                    onChange={(e) => setStartTime(Math.max(0, Math.min(parseFloat(e.target.value) || 0, endTime - 0.2)))}
-                    className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 font-mono focus:outline-none"
-                  />
-                  <span className="text-[10px] text-slate-500 font-mono">초</span>
-                  <div className="flex gap-1 flex-shrink-0">
-                    <button
-                      onClick={() => setStartTime(prev => Math.max(0, prev - 1))}
-                      type="button"
-                      className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
+              <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between">
+                <div>
+                  <div className="text-[11px] font-bold text-slate-400 px-0.5 flex items-center gap-1.5 mb-2.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    시작지점 (A) 미세조정 [Q]
+                  </div>
+
+                  {/* A지점 수동 조절 및 피드백 */}
+                  <div className="flex items-center gap-1.5 mt-2.5">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max={endTime - 0.2}
+                      value={isStartSet ? startTime.toFixed(1) : ""}
+                      placeholder="미지정"
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        if (!isNaN(val)) {
+                          updateStartTime(Math.max(0, Math.min(val, endTime - 0.2)));
+                        } else {
+                          // Allow empty input without immediately triggering NaN error
+                          setStartTime(0);
+                          setIsStartSet(false);
+                        }
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 font-mono focus:outline-none"
+                    />
+                    <span className="text-[10px] text-slate-500 font-mono">초</span>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button
+                        onClick={() => updateStartTime(Math.max(0, startTime - 1))}
+                        type="button"
+                        className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
+                      >
+                        -1s
+                      </button>
+                      <button
+                        onClick={() => updateStartTime(Math.min(endTime - 0.2, startTime + 1))}
+                        type="button"
+                        className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
+                      >
+                        +1s
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 재생 속도 슬라이더 */}
+                  <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-2.5 mt-2.5 space-y-2">
+                    <div 
+                      onClick={() => {
+                        changeSpeedFactor(1.00);
+                        showTemporaryNotification("재생 속도가 1.00x로 초기화되었습니다 ⚡");
+                      }}
+                      className="flex items-center justify-between text-[10px] text-slate-400 font-bold px-0.5 cursor-pointer hover:text-indigo-300 transition-colors"
+                      title="클릭하여 1.00x 배속으로 초기화"
                     >
-                      -1s
-                    </button>
-                    <button
-                      onClick={() => setStartTime(prev => Math.min(endTime - 0.2, prev + 1))}
-                      type="button"
-                      className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
-                    >
-                      +1s
-                    </button>
+                      <span className="flex items-center gap-1">⚡ 재생 속도 <span className="text-[8.5px] font-normal underline text-slate-500">(초기화)</span></span>
+                      <strong className="text-indigo-400 font-mono bg-indigo-500/10 px-1.5 py-0.5 rounded hover:bg-indigo-500 hover:text-slate-950 transition-all">{playbackSpeed.toFixed(2)}x</strong>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.25"
+                      max="2.00"
+                      step="0.05"
+                      value={playbackSpeed}
+                      onChange={(e) => changeSpeedFactor(parseFloat(e.target.value))}
+                      className="w-full accent-indigo-550 cursor-ew-resize h-1 bg-slate-800 rounded-lg appearance-none block"
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Range B Set Deck */}
-              <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-rose-400 flex items-center gap-1">
-                    🔴 종료점 지정 (B)
+              {/* Middle Playback Video Navigation Deck */}
+              <div className="bg-indigo-950/20 p-3 rounded-xl border border-indigo-500/15 flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between border-b border-indigo-500/10 pb-1.5">
+                  <span className="text-[11px] font-bold text-indigo-400 flex items-center gap-1">
+                    ⚡ 동영상 네비게이션
                   </span>
+                  <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 border border-indigo-700/20">
+                    Live CTRL
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-center gap-4 py-1.5">
+                  {/* 10 seconds back */}
                   <button
-                    onClick={() => {
-                      const current = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
-                      setEndTime(Math.max(startTime + 0.2, Math.min(current, videoMeta.duration)));
-                      showTemporaryNotification("현시점을 종료점(B)에 담았습니다 📍");
-                    }}
+                    onClick={() => handleSeekRelative(-10)}
                     type="button"
-                    title="현재 플레이어 시점 입력"
-                    className="text-[10.5px] text-rose-300 font-semibold flex items-center gap-0.5 bg-rose-500/15 hover:bg-rose-500/30 px-2 py-0.5 rounded border border-rose-500/20 transition-colors"
+                    title="10초 뒤로 탐색"
+                    className="p-3 rounded-full bg-slate-950 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-all active:scale-90 cursor-pointer"
                   >
-                     현시점으로 캡처 [W]
+                    <SkipBack className="w-4 h-4" />
+                  </button>
+
+                  {/* Highly polished, very clear and large Play/Pause Circle button */}
+                  <button
+                    onClick={handleTogglePlay}
+                    type="button"
+                    title={isPlaying ? "일시정지" : "재생"}
+                    className="w-14 h-14 rounded-full bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white transition-all cursor-pointer flex items-center justify-center shadow-xl shadow-indigo-500/25 active:scale-95 border border-indigo-450 hover:border-white"
+                  >
+                    {isPlaying ? (
+                      <Pause className="w-5 h-5 fill-current text-white" />
+                    ) : (
+                      <Play className="w-5 h-5 fill-current text-white ml-0.5" />
+                    )}
+                  </button>
+
+                  {/* 10 seconds forward */}
+                  <button
+                    onClick={() => handleSeekRelative(10)}
+                    type="button"
+                    title="10초 앞으로 탐색"
+                    className="p-3 rounded-full bg-slate-950 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-all active:scale-90 cursor-pointer"
+                  >
+                    <SkipForward className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min={startTime + 0.2}
-                    max={videoMeta.duration}
-                    value={endTime.toFixed(1)}
-                    onChange={(e) => setEndTime(Math.max(startTime + 0.2, Math.min(parseFloat(e.target.value) || 0, videoMeta.duration)))}
-                    className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 font-mono focus:outline-none"
-                  />
-                  <span className="text-[10px] text-slate-500 font-mono">초</span>
-                  <div className="flex gap-1 flex-shrink-0">
+
+                <div className="flex items-center justify-center gap-2 pb-1">
+                  {/* Frame step backward */}
+                  <button
+                    onClick={() => handleFrameSeek(false)}
+                    type="button"
+                    title="1프레임 뒤로 (단축키: ,)"
+                    className="flex-1 py-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 transition-colors flex items-center justify-center gap-1 font-mono text-[10.5px] font-bold"
+                  >
+                    ◀ 1프레임 뒤로
+                  </button>
+
+                  {/* Frame step forward */}
+                  <button
+                    onClick={() => handleFrameSeek(true)}
+                    type="button"
+                    title="1프레임 앞으로 (단축키: .)"
+                    className="flex-1 py-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 transition-colors flex items-center justify-center gap-1 font-mono text-[10.5px] font-bold"
+                  >
+                    1프레임 앞으로 ▶
+                  </button>
+                </div>
+              </div>
+              <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between">
+                <div>
+                  <div className="text-[11px] font-bold text-slate-400 px-0.5 flex items-center gap-1.5 mb-2.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                    종료지점 (B) 미세조정 [W]
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-2.5">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={startTime + 0.2}
+                      max={videoMeta.duration}
+                      value={isEndSet ? endTime.toFixed(1) : ""}
+                      placeholder="미지정"
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        if (!isNaN(val)) {
+                          updateEndTime(Math.max(startTime + 0.2, Math.min(val, videoMeta.duration)));
+                        } else {
+                          // Allow empty input without immediately triggering NaN error
+                          setEndTime(videoMeta.duration || 300);
+                          setIsEndSet(false);
+                        }
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 font-mono focus:outline-none"
+                    />
+                    <span className="text-[10px] text-slate-500 font-mono">초</span>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button
+                        onClick={() => updateEndTime(Math.max(startTime + 0.2, endTime - 1))}
+                        type="button"
+                        className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
+                      >
+                        -1s
+                      </button>
+                      <button
+                        onClick={() => updateEndTime(Math.min(videoMeta.duration, endTime + 1))}
+                        type="button"
+                        className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
+                      >
+                        +1s
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 반복 & 지연 정지 대기 (1줄 배치) */}
+                  <div className="flex items-center gap-1.5 mt-3 pt-2.5 border-t border-slate-900/60 select-none">
                     <button
-                      onClick={() => setEndTime(prev => Math.max(startTime + 0.2, prev - 1))}
+                      onClick={() => setLoopActive(!loopActive)}
                       type="button"
-                      className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
+                      title={`반복 상태 토글 (단축키: ${hotkeys.loopToggle})`}
+                      className={`flex-1 flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                        loopActive
+                          ? "bg-indigo-600/30 text-indigo-400 border-indigo-500/40"
+                          : "bg-slate-900 text-slate-400 border-slate-800"
+                      }`}
                     >
-                      -1s
+                      <div className="flex items-center gap-1.5 text-left text-[11px]">
+                        <span className={`w-1.5 h-1.5 rounded-full inline-block ${loopActive ? "bg-indigo-400 animate-pulse" : "bg-slate-650"}`} />
+                        <span>반복 [{hotkeys.loopToggle}]</span>
+                      </div>
+                      <span className="text-[9.5px] text-indigo-400 bg-indigo-500/10 px-1 py-0.5 rounded leading-none shrink-0 font-bold">
+                        {loopActive ? "켜짐" : "꺼짐"}
+                      </span>
                     </button>
+
+                    <div className="flex-1 flex items-center justify-between bg-slate-900 border border-slate-800 py-1.5 px-2.5 rounded-lg text-[11px] text-slate-300 h-[30px]">
+                      <span className="text-slate-405 font-bold shrink-0">지연 정지:</span>
+                      <select
+                        value={cooldownDelay}
+                        onChange={(e) => setCooldownDelay(parseInt(e.target.value))}
+                        className="bg-transparent border-0 text-amber-450 font-bold focus:outline-none cursor-pointer outline-none font-sans text-[11px] pr-1"
+                      >
+                        <option value={0} className="bg-slate-900">없음 (0초)</option>
+                        {Array.from({ length: 10 }, (_, i) => i + 1).map((sec) => (
+                          <option key={sec} value={sec} className="bg-slate-900">
+                            {sec}초
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* 현구간 추가 & 내보내기 / 읽어오기 버튼 줄 */}
+                  <div className="flex items-center gap-1.5 mt-2">
                     <button
-                      onClick={() => setEndTime(prev => Math.min(videoMeta.duration, prev + 1))}
+                      onClick={handleQuickAddBookmark}
                       type="button"
-                      className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
+                      className="flex-1 flex items-center justify-center gap-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-3 py-1.5 rounded-full text-[11px] transition-all hover:scale-102 cursor-pointer"
                     >
-                      +1s
+                      <Plus className="w-3.5 h-3.5 text-slate-950 font-bold shrink-0" />
+                      <span>현구간 추가</span>
                     </button>
+                    
+                    <button
+                      onClick={handleQuickExportBookmarks}
+                      type="button"
+                      title="구간 백업 내보내기 (JSON)"
+                      className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors shrink-0 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+
+                    <label
+                      title="구간 백업 불러오기 (JSON)"
+                      className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors cursor-pointer shrink-0"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={handleQuickImportBookmarks}
+                        className="hidden"
+                      />
+                    </label>
                   </div>
                 </div>
               </div>
 
             </div>
-          </div>
-
-          {/* C. Interactive Controller Play Deck (Play/Pause, Step times, frame control) */}
-          <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 space-y-4">
-
-            {/* Core Buttons Layout (Play, Pause, +/- 10s, seek index targets) */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              
-              <div className="flex items-center gap-2">
-                {/* 10 seconds back */}
-                <button
-                  onClick={() => handleSeekRelative(-10)}
-                  type="button"
-                  title="10초 뒤로 탐색"
-                  className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 hover:bg-slate-800 text-slate-355 transition-colors"
-                >
-                  <SkipBack className="w-4 h-4" />
-                </button>
-
-                {/* Main Play Toggle button */}
-                <button
-                  onClick={handleTogglePlay}
-                  type="button"
-                  className="flex items-center gap-2 bg-indigo-505 hover:bg-indigo-400 text-slate-950 hover:text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-lg shadow-indigo-500/10 transition-all"
-                >
-                  {isPlaying ? (
-                    <>
-                      <Pause className="w-4 h-4 fill-current" />
-                      일시 정지
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-4 h-4 fill-current" />
-                      동영상 재생
-                    </>
-                  )}
-                </button>
-
-                {/* 10 seconds forward */}
-                <button
-                  onClick={() => handleSeekRelative(10)}
-                  type="button"
-                  title="10초 앞으로 탐색"
-                  className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 hover:bg-slate-800 text-slate-355 transition-colors"
-                >
-                  <SkipForward className="w-4 h-4" />
-                </button>
-
-                {/* Restart Loop Target A point instantly */}
-                <button
-                  onClick={() => {
-                    handleSeekToTime(startTime);
-                    if (playerRef.current) {
-                      playerRef.current.playVideo();
-                    }
-                    setIsPlaying(true);
-                    showTemporaryNotification("A 포인트로 순간이동하여 재생을 시작합니다 ⚡");
-                  }}
-                  type="button"
-                  className="flex items-center gap-1 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 py-2.5 px-3.5 rounded-xl transition-all font-medium"
-                >
-                  A로 시작
-                </button>
-              </div>
-
-              {/* Instant Frame by Frame controls positioned between Play buttons and Playback Speed */}
-              <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1.5 rounded-xl">
-                <span className="text-[10px] text-slate-400 px-2 font-bold whitespace-nowrap">프레임 미세이동 :</span>
-                <button
-                  onClick={() => handleFrameSeek(false)}
-                  type="button"
-                  title="프레임 단위 1보 후진 (단축키: ,)"
-                  className="px-2.5 py-1 text-[11px] bg-slate-850 hover:bg-slate-750 border border-slate-800/60 rounded text-indigo-300 font-bold font-mono transition-colors"
-                >
-                  ◀ 1f
-                </button>
-                <button
-                  onClick={() => handleFrameSeek(true)}
-                  type="button"
-                  title="프레임 단위 1보 전진 (단축키: .)"
-                  className="px-2.5 py-1 text-[11px] bg-slate-850 hover:bg-slate-755 border border-slate-800/60 rounded text-indigo-300 font-bold font-mono transition-colors"
-                >
-                  1f ▶
-                </button>
-              </div>
-
-              {/* Continuous speed rate manager */}
-              <div className="flex items-center gap-3 bg-slate-950 border border-slate-800 p-2.5 rounded-xl flex-1 max-w-xs">
-                <span className="text-[11px] font-bold text-slate-400 whitespace-nowrap">
-                  재생 속도: <strong className="text-indigo-400">{playbackSpeed.toFixed(2)}x</strong>
-                </span>
-                <input
-                  type="range"
-                  min="0.25"
-                  max="2.00"
-                  step="0.05"
-                  value={playbackSpeed}
-                  onChange={(e) => changeSpeedFactor(parseFloat(e.target.value))}
-                  className="w-full accent-indigo-550 cursor-ew-resize h-1 bg-slate-800 rounded-lg appearance-none"
-                />
-              </div>
-
-            </div>
-
-            {/* Quick Speed presets */}
-            <div className="flex flex-wrap items-center gap-1 px-1">
-              <span className="text-[10px] text-slate-500 mr-2 font-semibold">속도 프리셋:</span>
-              {[0.5, 0.75, 0.8, 0.9, 1.0, 1.15, 1.25, 1.5, 2.0].map((s) => (
-                <button
-                  key={s}
-                  onClick={() => changeSpeedFactor(s)}
-                  type="button"
-                  className={`px-2.5 py-1 text-[10.5px] rounded-lg font-mono tracking-tight transition-colors ${
-                    Math.abs(playbackSpeed - s) < 0.01
-                      ? "bg-indigo-500 text-slate-950 font-bold"
-                      : "bg-slate-950 hover:bg-slate-800 text-slate-400"
-                  }`}
-                >
-                  {s.toFixed(2)}x
-                </button>
-              ))}
-            </div>
-
           </div>
 
         </section>
@@ -1208,68 +1411,98 @@ export default function App() {
         {/* RIGHT COLUMN (Bookmarks list panel & File configuration manager) */}
         <aside className="lg:col-span-5 xl:col-span-4 bg-slate-950/40 rounded-3xl p-4 border border-slate-800 space-y-4">
           
-          {/* 구간 반복 설정 (Loop Repeater Settings) */}
+          {/* 유튜브 동영상 검색 (YouTube Video Search) */}
           <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 space-y-3">
-            <h4 className="text-xs font-bold text-indigo-300 flex items-center gap-2">
-              <RotateCw className="w-4.5 h-4.5 text-indigo-400 animate-spin-slow" />
-              구간 반복 설정
-            </h4>
-            
-            <div className="flex flex-col gap-2.5">
-              <button
-                onClick={() => setLoopActive(!loopActive)}
-                type="button"
-                className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  loopActive
-                    ? "bg-indigo-600/30 text-indigo-400 border border-indigo-500/40"
-                    : "bg-slate-950 text-slate-400 border border-slate-800"
-                }`}
-              >
-                <div className="flex items-center gap-2 text-left">
-                  <span className={`w-2.5 h-2.5 rounded-full inline-block ${loopActive ? "bg-indigo-400 animate-pulse" : "bg-slate-600"}`} />
-                  <span>반복 활성화 [{hotkeys.loopToggle}]</span>
-                </div>
-                <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded leading-none">
-                  {loopActive ? "켜짐" : "꺼짐"}
-                </span>
-              </button>
-
-              <div className="flex flex-col gap-2.5">
-                {/* Auto Cooldown setup */}
-                <div className="flex items-center justify-between bg-slate-950 border border-slate-800 py-1.5 px-3 rounded-xl text-xs text-slate-300">
-                  <span className="text-slate-450 font-medium font-sans">지연 정지 대기:</span>
-                  <select
-                    value={cooldownDelay}
-                    onChange={(e) => setCooldownDelay(parseInt(e.target.value))}
-                    className="bg-transparent border-0 text-amber-450 font-bold focus:outline-none cursor-pointer"
-                  >
-                    <option value={0} className="bg-slate-900">없음 (0초)</option>
-                    <option value={1} className="bg-slate-900">1초 정지</option>
-                    <option value={2} className="bg-slate-900">2초 정지</option>
-                    <option value={3} className="bg-slate-900">3초 정지</option>
-                  </select>
-                </div>
-
-                {/* Auto beep countdown toggling */}
-                {cooldownDelay > 0 && (
-                  <label className="flex items-center justify-between bg-slate-950 border border-slate-800 py-1.5 px-3 rounded-xl text-xs text-slate-300 select-none cursor-pointer">
-                    <span className="text-slate-400 font-sans">카운트다운 비프음:</span>
-                    <input
-                      type="checkbox"
-                      checked={countdownIntro}
-                      onChange={(e) => setCountdownIntro(e.target.checked)}
-                      className="rounded bg-slate-950 border-slate-850 text-indigo-500 focus:ring-0"
-                    />
-                  </label>
-                )}
-              </div>
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-indigo-300 flex items-center gap-2 font-display">
+                <Search className="w-3.5 h-3.5 text-indigo-400" />
+                유튜브 동영상 검색
+              </h4>
+              {searchResults.length > 0 && (
+                <button
+                  onClick={() => {
+                    setSearchResults([]);
+                    setSearchQuery("");
+                  }}
+                  className="text-[10px] text-slate-450 hover:text-rose-400 transition-colors font-medium"
+                  type="button"
+                >
+                  결과 지우기
+                </button>
+              )}
             </div>
+
+            <form onSubmit={handleYoutubeSearch} className="flex gap-1.5">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="검색 키워드 입력..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-950/80 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSearching}
+                className="bg-indigo-650 hover:bg-indigo-550 text-white px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors flex items-center gap-1 disabled:opacity-50 shrink-0 cursor-pointer"
+              >
+                {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-200" /> : <Search className="w-3.5 h-3.5" />}
+                <span>검색</span>
+              </button>
+            </form>
+
+            {/* 에러 피드백 */}
+            {searchError && (
+              <div className="text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl p-2 font-medium">
+                ⚠️ {searchError}
+              </div>
+            )}
+
+            {/* 검색 결과 리스트 */}
+            {searchResults.length > 0 && (
+              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-850">
+                {searchResults.map((item) => {
+                  const isCurrent = item.id === activeVideoId;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        loadNewVideo(item.id);
+                      }}
+                      type="button"
+                      className={`w-full p-2 rounded-xl text-left border flex items-start gap-2.5 transition-all text-xs cursor-pointer ${
+                        isCurrent
+                          ? "bg-indigo-950/40 border-indigo-500/80"
+                          : "bg-slate-950/50 hover:bg-slate-950 border-slate-900/60 hover:border-slate-800"
+                      }`}
+                    >
+                      <img
+                        src={item.thumbnail}
+                        alt=""
+                        className="w-16 h-10 object-cover rounded-lg bg-slate-900 border border-slate-850 shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <h5 className="font-semibold text-slate-200 line-clamp-2 leading-tight text-[11px]" title={item.title}>
+                          {item.title}
+                        </h5>
+                        <p className="text-[10px] text-indigo-400/80 mt-1 truncate font-mono">
+                          📺 {item.channelTitle}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <BookmarkManager
             bookmarks={bookmarks}
             folders={folders}
             currentVideoId={activeVideoId}
+            currentVideoTitle={activeVideoId ? videoMeta.title : undefined}
+            currentChannelName={activeVideoId && videoMeta.channelTitle !== "채널명 없음" && videoMeta.channelTitle !== "유튜브 채널 정보" ? videoMeta.channelTitle : undefined}
             currentA={startTime}
             currentB={endTime}
             currentSpeed={playbackSpeed}
@@ -1278,51 +1511,9 @@ export default function App() {
             onAddFolder={handleAddFolder}
             onDeleteFolder={handleDeleteFolder}
             onSelectBookmark={handleSelectBookmark}
+            onUpdateBookmark={handleUpdateBookmark}
             onImportData={handleImportData}
           />
-
-          {/* 인스턴스 추천 리스트 (Preset recommendations list) */}
-          <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800/80 space-y-3">
-            <h4 className="text-xs font-bold text-slate-300 flex items-center gap-2">
-              <Flame className="w-4 h-4 text-amber-400" />
-              인스턴스 추천 학습 리스트
-            </h4>
-            <div className="flex flex-col gap-2">
-              {PRESET_VIDEOS.map((item) => {
-                const IconComponent = item.icon;
-                const isActive = item.id === activeVideoId;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => setActiveVideoId(item.id)}
-                    type="button"
-                    className={`p-2.5 rounded-xl border text-left transition-all group flex items-start gap-2.5 cursor-pointer ${
-                      isActive
-                        ? "bg-indigo-950/40 border-indigo-500/80"
-                        : "bg-slate-950/50 hover:bg-slate-950 border-slate-800/80 hover:border-slate-700"
-                    }`}
-                  >
-                    <div className={`p-2 rounded-lg ${isActive ? "bg-indigo-500/20 text-indigo-300" : "bg-slate-900 text-slate-400 group-hover:text-indigo-400"} transition-colors`}>
-                      <IconComponent className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1 overflow-hidden">
-                        <span className="text-[9px] uppercase font-extrabold text-indigo-400 font-mono tracking-tight shrink-0">
-                          {item.tag}
-                        </span>
-                        <span className="text-[9px] text-slate-500 font-mono truncate max-w-[80px]">
-                          {item.channel}
-                        </span>
-                      </div>
-                      <h5 className="text-[11.5px] font-semibold text-slate-200 truncate mt-0.5" title={item.title}>
-                        {item.title}
-                      </h5>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
         </aside>
 

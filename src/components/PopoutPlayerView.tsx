@@ -167,12 +167,26 @@ export function PopoutPlayerView() {
             iframeReadyRef.current = true;
             event.target.setPlaybackRate(playbackSpeed);
             
-            // 영상을 즉시 플레이하여 반응 준비 상태로 만든 뒤 정지(Pause)시켜 대기함
-            event.target.playVideo();
+            // 항상 오토플레이를 구현하기 위해 우선 mute한 다음 플레이 및 탐색(seekTo) 시그널을 강제로 보내고,
+            // 그 뒤 즉각적인 일시정지(pauseVideo) 및 unmute를 실행하여 비디오를 활성화 & 대기 상태로 맞춥니다.
+            try {
+              event.target.mute();
+              event.target.seekTo(startTime, true);
+              event.target.playVideo();
+            } catch (e) {}
+
             setTimeout(() => {
               try {
-                if (playerRef.current && typeof playerRef.current.pauseVideo === "function") {
-                  playerRef.current.pauseVideo();
+                if (event.target) {
+                  if (typeof event.target.pauseVideo === "function") {
+                    event.target.pauseVideo();
+                  }
+                  if (typeof event.target.seekTo === "function") {
+                    event.target.seekTo(startTime, true);
+                  }
+                  if (typeof event.target.unmute === "function") {
+                    event.target.unmute();
+                  }
                 }
               } catch (e) {}
               setIsPlaying(false);

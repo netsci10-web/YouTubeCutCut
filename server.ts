@@ -71,6 +71,48 @@ async function startServer() {
     }
   });
 
+  // API to search YouTube videos securely
+  app.get("/api/youtube-search", async (req, res) => {
+    try {
+      const query = req.query.q as string;
+      if (!query) {
+        return res.status(400).json({ error: "q is required" });
+      }
+
+      const apiKey = process.env.YOUTUBE_API_KEY || "AIzaSyA3dXC8mF32ItPvd5wUDBt-uUWZvonvY5Q";
+      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&maxResults=10&key=${apiKey}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`YouTube Search API returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      const items = (data.items || []).map((item: any) => {
+        const titleRaw = item.snippet?.title || "Unknown Title";
+        // Simple HTML entity decode for titles
+        const title = titleRaw
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>');
+
+        return {
+          id: item.id?.videoId || "",
+          title: title,
+          channelTitle: item.snippet?.channelTitle || "YouTube Channel",
+          thumbnail: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url || "",
+        };
+      }).filter((item: any) => item.id !== "");
+
+      return res.json({ items });
+    } catch (error: any) {
+      console.error("Error backend YouTube search:", error.message);
+      return res.status(500).json({ error: error.message, items: [] });
+    }
+  });
+
   // Serve static files in production, use Vite middleware in development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

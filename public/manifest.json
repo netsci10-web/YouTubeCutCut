@@ -1,0 +1,25 @@
+{
+  "name": "YouTube CutCut",
+  "short_name": "CutCut",
+  "description": "유튜브 구간 반복 학습기 - 정교한 루프 컨트롤, 단축키 지원, 북마크 관리",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='192' height='192' viewBox='0 0 192 192'><rect width='192' height='192' rx='42' fill='%23020617'/><path d='M60 50l90 46-90 46V50z' fill='%2310b981'/><path d='M105 96l-45-23v46z' fill='%23f43f5e'/><circle cx='96' cy='96' r='76' fill='none' stroke='%230ea5e9' stroke-width='8'/></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='512' height='512' viewBox='0 0 512 512'><rect width='512' height='512' rx='112' fill='%23020617'/><path d='M160 133l240 123-240 123V133z' fill='%2310b981'/><path d='M280 256l-120-61v122z' fill='%23f43f5e'/><circle cx='256' cy='256' r='202' fill='none' stroke='%230ea5e9' stroke-width='22'/></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

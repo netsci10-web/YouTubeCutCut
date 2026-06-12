@@ -2,6 +2,8 @@ export interface Bookmark {
   id: string;
   title: string;
   videoId: string;
+  videoTitle?: string;
+  channelName?: string;
   startTime: number;
   endTime: number;
   speed: number;

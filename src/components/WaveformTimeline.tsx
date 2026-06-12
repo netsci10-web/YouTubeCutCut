@@ -9,6 +9,8 @@ interface WaveformTimelineProps {
   onChangeEnd: (val: number) => void;
   onSeek: (val: number) => void;
   videoId: string;
+  isStartSet?: boolean;
+  isEndSet?: boolean;
 }
 
 export function WaveformTimeline({
@@ -20,6 +22,8 @@ export function WaveformTimeline({
   onChangeEnd,
   onSeek,
   videoId,
+  isStartSet = true,
+  isEndSet = true,
 }: WaveformTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragTarget, setDragTarget] = useState<"start" | "end" | "seek" | null>(null);
@@ -144,16 +148,42 @@ export function WaveformTimeline({
   return (
     <div className="w-full select-none mt-2">
       {/* Visual coordinates metadata */}
-      <div className="flex justify-between text-xs text-slate-400 font-mono mb-1.5 px-1">
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-950 inline-block"></span>
-          기작지점 (A): <strong className="text-emerald-400">{formatTime(startTime)}</strong>
+      <div className="flex justify-between items-center text-xs text-slate-400 font-mono mb-2 px-1">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onChangeStart(Math.max(0, Math.min(currentTime, endTime - 0.2)));
+          }}
+          type="button"
+          title="현재 재생 위치를 시작지점(A)으로 지정 [단축키: Q]"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-emerald-500/10 active:scale-95 border border-slate-800 hover:border-emerald-500/30 text-slate-300 transition-all cursor-pointer font-sans"
+        >
+          <span className={`w-2 h-2 rounded-full ring-2 ring-emerald-950 inline-block ${isStartSet ? "bg-emerald-500" : "bg-slate-600 animate-pulse"}`}></span>
+          <span className="text-slate-300 font-semibold text-xs">시작지점 (A):</span>
+          <strong className={`font-mono text-xs ${isStartSet ? "text-emerald-400" : "text-slate-550"}`}>
+            {isStartSet ? formatTime(startTime) : "지정하기"}
+          </strong>
+        </button>
+
+        <span className="text-slate-400 font-sans text-xs bg-slate-950/40 border border-slate-900 px-3 py-1.5 rounded-xl">
+          현재: <strong className="text-sky-300 font-mono font-bold">{formatTime(currentTime)}</strong>
         </span>
-        <span className="text-slate-500">현재: <strong className="text-sky-300 font-bold">{formatTime(currentTime)}</strong></span>
-        <span className="flex items-center gap-1.5">
-          종료지점 (B): <strong className="text-rose-400">{formatTime(endTime)}</strong>
-          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-rose-950 inline-block"></span>
-        </span>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onChangeEnd(Math.max(startTime + 0.2, Math.min(currentTime, duration)));
+          }}
+          type="button"
+          title="현재 재생 위치를 종료지점(B)으로 지정 [단축키: W]"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-rose-500/10 active:scale-95 border border-slate-800 hover:border-rose-500/30 text-slate-300 transition-all cursor-pointer font-sans"
+        >
+          <span className="text-slate-300 font-semibold text-xs">종료지점 (B):</span>
+          <strong className={`font-mono text-xs ${isEndSet ? "text-rose-400" : "text-slate-550"}`}>
+            {isEndSet ? formatTime(endTime) : "지정하기"}
+          </strong>
+          <span className={`w-2 h-2 rounded-full ring-2 ring-rose-950 inline-block ${isEndSet ? "bg-rose-500" : "bg-slate-600 animate-pulse"}`}></span>
+        </button>
       </div>
 
       <div
@@ -163,29 +193,37 @@ export function WaveformTimeline({
         id="waveform-area"
       >
         {/* Shaded loop region background */}
-        <div
-          className="absolute h-full bg-slate-800/40 border-x border-slate-700/50"
-          style={{
-            left: `${startPct}%`,
-            width: `${endPct - startPct}%`,
-          }}
-        />
+        {isStartSet && isEndSet && (
+          <div
+            className="absolute h-full bg-slate-800/40 border-x border-slate-700/50"
+            style={{
+              left: `${startPct}%`,
+              width: `${endPct - startPct}%`,
+            }}
+          />
+        )}
 
         {/* Shaded non-loop inactive regions */}
-        <div
-          className="absolute h-full left-0 top-0 bg-slate-950/60"
-          style={{ width: `${startPct}%` }}
-        />
-        <div
-          className="absolute h-full right-0 top-0 bg-slate-950/60"
-          style={{ left: `${endPct}%` }}
-        />
+        {isStartSet && (
+          <div
+            className="absolute h-full left-0 top-0 bg-slate-950/60"
+            style={{ width: `${startPct}%` }}
+          />
+        )}
+        {isEndSet && (
+          <div
+            className="absolute h-full right-0 top-0 bg-slate-950/60"
+            style={{ left: `${endPct}%` }}
+          />
+        )}
 
         {/* Realistic procedural audio waveform bars */}
         <div className="absolute inset-x-0 inset-y-1.5 flex items-center justify-between px-2 gap-[2px] pointer-events-none">
           {waves.map((height, idx) => {
             const barPct = (idx / waves.length) * 100;
-            const isInsideSelection = barPct >= startPct && barPct <= endPct;
+            const effectiveStartPct = isStartSet ? startPct : 0;
+            const effectiveEndPct = isEndSet ? endPct : 100;
+            const isInsideSelection = barPct >= effectiveStartPct && barPct <= effectiveEndPct;
             const isPassedPlayhead = barPct <= currentPct;
 
             let barColor = "bg-slate-700 opacity-40";
@@ -217,32 +255,38 @@ export function WaveformTimeline({
         </div>
 
         {/* Draggable Handle A Line & Ribbon */}
-        <div
-          className="absolute top-0 bottom-0 w-[2px] bg-emerald-500 cursor-ew-resize group"
-          style={{ left: `${startPct}%` }}
-        >
-          <div className="absolute -top-1 -left-2.5 w-6 h-6 flex items-center justify-center bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[10px] rounded-full shadow-[0_2px_5px_rgba(0,0,0,0.5)] border-2 border-slate-900 leading-none">
-            A
+        {isStartSet && (
+          <div
+            className="absolute top-0 bottom-0 w-[2px] bg-emerald-500 cursor-ew-resize group"
+            style={{ left: `${startPct}%` }}
+          >
+            <div className="absolute -top-1 -left-2.5 w-6 h-6 flex items-center justify-center bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[10px] rounded-full shadow-[0_2px_5px_rgba(0,0,0,0.5)] border-2 border-slate-900 leading-none">
+              A
+            </div>
+            <div className="absolute bottom-1 -left-1.5 w-3 h-3 bg-emerald-500 border border-slate-900 transform rotate-45" />
           </div>
-          <div className="absolute bottom-1 -left-1.5 w-3 h-3 bg-emerald-500 border border-slate-900 transform rotate-45" />
-        </div>
+        )}
 
         {/* Draggable Handle B Line & Ribbon */}
-        <div
-          className="absolute top-0 bottom-0 w-[2px] bg-rose-500 cursor-ew-resize group"
-          style={{ left: `${endPct}%` }}
-        >
-          <div className="absolute -top-1 -left-2.5 w-6 h-6 flex items-center justify-center bg-rose-500 hover:bg-rose-400 text-slate-950 font-extrabold text-[10px] rounded-full shadow-[0_2px_5px_rgba(0,0,0,0.5)] border-2 border-slate-900 leading-none">
-            B
+        {isEndSet && (
+          <div
+            className="absolute top-0 bottom-0 w-[2px] bg-rose-500 cursor-ew-resize group"
+            style={{ left: `${endPct}%` }}
+          >
+            <div className="absolute -top-1 -left-2.5 w-6 h-6 flex items-center justify-center bg-rose-500 hover:bg-rose-400 text-slate-950 font-extrabold text-[10px] rounded-full shadow-[0_2px_5px_rgba(0,0,0,0.5)] border-2 border-slate-900 leading-none">
+              B
+            </div>
+            <div className="absolute bottom-1 -left-1.5 w-3 h-3 bg-rose-500 border border-slate-900 transform rotate-45" />
           </div>
-          <div className="absolute bottom-1 -left-1.5 w-3 h-3 bg-rose-500 border border-slate-900 transform rotate-45" />
-        </div>
+        )}
       </div>
 
       {/* Helpful duration coordinates helper footer */}
       <div className="flex justify-between text-[11px] text-slate-500 font-mono mt-1 px-1">
         <span>00:00.0</span>
-        <span className="text-amber-500 font-medium">선택 구간 간격: {formatTime(endTime - startTime)}</span>
+        <span className="text-amber-500 font-medium">
+          선택 구간 간격: {isStartSet && isEndSet ? formatTime(endTime - startTime) : "미지정"}
+        </span>
         <span>{formatTime(duration)}</span>
       </div>
     </div>

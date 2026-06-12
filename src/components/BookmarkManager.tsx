@@ -9,6 +9,8 @@ interface BookmarkManagerProps {
   bookmarks: Bookmark[];
   folders: Folder[];
   currentVideoId: string;
+  currentVideoTitle?: string;
+  currentChannelName?: string;
   currentA: number;
   currentB: number;
   currentSpeed: number;
@@ -16,7 +18,8 @@ interface BookmarkManagerProps {
   onDeleteBookmark: (id: string) => void;
   onAddFolder: (name: string, color: string) => void;
   onDeleteFolder: (id: string) => void;
-  onSelectBookmark: (bookmark: Bookmark) => void;
+  onSelectBookmark: (bookmark: Bookmark, autoPlay?: boolean) => void;
+  onUpdateBookmark?: (id: string, updatedFields: Partial<Bookmark>) => void;
   onImportData: (bookmarks: Bookmark[], folders: Folder[]) => void;
 }
 
@@ -24,6 +27,8 @@ export function BookmarkManager({
   bookmarks,
   folders,
   currentVideoId,
+  currentVideoTitle,
+  currentChannelName,
   currentA,
   currentB,
   currentSpeed,
@@ -32,6 +37,7 @@ export function BookmarkManager({
   onAddFolder,
   onDeleteFolder,
   onSelectBookmark,
+  onUpdateBookmark,
   onImportData,
 }: BookmarkManagerProps) {
   // Folder UI States
@@ -39,6 +45,10 @@ export function BookmarkManager({
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderColor, setNewFolderColor] = useState(PRESET_COLORS[0].name);
   const [showAddFolder, setShowAddFolder] = useState(false);
+
+  // Safe delete state configurations
+  const [deletingFolderId, setDeletingFolderId] = useState<string | null>(null);
+  const [deletingBookmarkId, setDeletingBookmarkId] = useState<string | null>(null);
 
   // Bookmark creation Form States
   const [bmTitle, setBmTitle] = useState("");
@@ -50,6 +60,11 @@ export function BookmarkManager({
 
   // Drag and Drop files import state
   const [isDragOver, setIsDragOver] = useState(false);
+
+  // Inline edit state
+  const [editingBmId, setEditingBmId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editNotes, setEditNotes] = useState("");
 
   // Helper formats
   const formatTime = (sec: number) => {
@@ -83,6 +98,8 @@ export function BookmarkManager({
     onAddBookmark({
       title: bmTitle.trim(),
       videoId: currentVideoId,
+      videoTitle: currentVideoTitle,
+      channelName: currentChannelName,
       startTime: currentA,
       endTime: currentB,
       speed: bmSpeed,
@@ -182,54 +199,11 @@ export function BookmarkManager({
   return (
     <div className="space-y-5" id="bookmark-playlist-module">
       
-      {/* 1. Header Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80">
-        <div>
-          <h3 className="font-sans font-bold text-base text-slate-100 flex items-center gap-2">
-            구간 리스트 & 플레이리스트
-          </h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">자주 학습하는 핵심 반복 구간을 생성하고 분류하세요.</p>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          {/* Add Bookmark Trigger */}
-          <button
-            onClick={() => {
-              setBmSpeed(currentSpeed);
-              setBmFolderId(selectedFolderId === "unassigned" ? "all" : selectedFolderId);
-              setShowAddBookmark(!showAddBookmark);
-              setShowAddFolder(false);
-            }}
-            type="button"
-            className="flex items-center gap-1 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all shadow-md active:scale-95"
-          >
-            <Plus className="w-4 h-4 text-slate-950 font-bold" />
-            현구간 추가 (A↔B)
-          </button>
-
-          {/* Import/Export buttons */}
-          <button
-            onClick={handleExport}
-            type="button"
-            title="구간 리스트 내보내기 (JSON)"
-            className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-
-          <label
-            title="구간 리스트 불러오기 (JSON)"
-            className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors cursor-pointer"
-          >
-            <Upload className="w-4 h-4" />
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleFileImport}
-              className="hidden"
-            />
-          </label>
-        </div>
+      {/* 1. Header Title */}
+      <div className="flex items-center justify-between gap-3 px-1 py-1">
+        <h3 className="font-sans font-bold text-base text-slate-100 flex items-center gap-2">
+          구간 리스트 & 플레이리스트
+        </h3>
       </div>
 
       {/* 2. Drag and Drop Import Dropzone area (hidden unless dragging) */}
@@ -473,16 +447,25 @@ export function BookmarkManager({
                 </button>
                 <button
                   onClick={() => {
-                    if (confirm(`'${f.name}' 폴더를 정말 삭제하시겠습니까? 안의 북마크들은 미분류로 전환됩니다.`)) {
+                    if (deletingFolderId === f.id) {
                       onDeleteFolder(f.id);
                       if (selectedFolderId === f.id) setSelectedFolderId("all");
+                      setDeletingFolderId(null);
+                    } else {
+                      setDeletingFolderId(f.id);
+                      // Auto-reset after 3 seconds
+                      setTimeout(() => setDeletingFolderId((prev) => (prev === f.id ? null : prev)), 3000);
                     }
                   }}
                   type="button"
-                  title="폴더 삭제"
-                  className="px-2 py-1.5 rounded-r-full bg-slate-900 border-y border-r border-slate-800 hover:bg-slate-850 text-slate-500 hover:text-rose-400 transition-colors"
+                  title={deletingFolderId === f.id ? "정말 삭제하시겠습니까? (다시 클릭)" : "폴더 삭제"}
+                  className={`px-2 py-1.5 rounded-r-full border-y border-r border-slate-800 transition-all text-[11px] ${
+                    deletingFolderId === f.id
+                      ? "bg-rose-600 hover:bg-rose-500 text-white font-bold animate-pulse px-3"
+                      : "bg-slate-900 hover:bg-slate-850 text-slate-500 hover:text-rose-400"
+                  }`}
                 >
-                  <Trash2 className="w-3 h-3" />
+                  {deletingFolderId === f.id ? "정말삭제?" : <Trash2 className="w-3 h-3" />}
                 </button>
               </div>
             );
@@ -506,82 +489,165 @@ export function BookmarkManager({
             return (
               <div
                 key={bm.id}
-                className="group relative bg-slate-900 border border-slate-800 rounded-2xl hover:border-slate-700/80 p-4 transition-all hover:shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                className="group relative bg-slate-900/90 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4 transition-all hover:shadow-md flex flex-col gap-2.5"
               >
-                {/* Information segment */}
-                <div className="space-y-1.5 flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {/* Folder label badge */}
-                    {fDetails && col && (
-                      <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded-full ${col.class} text-slate-950 inline-flex items-center gap-0.5`}>
-                        <FolderIcon className="w-2.5 h-2.5" />
-                        {fDetails.name}
+                {/* Simplified/optimized body to only have the green title pill and notes/tags if edit mode isn't on */}
+                {editingBmId === bm.id ? (
+                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 space-y-2 mt-0.5 w-full">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">🏷️ 구간 이름</label>
+                      <input
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-850 rounded-xl px-2.5 py-1 text-xs text-slate-100 focus:outline-none focus:border-indigo-550 focus:ring-1 focus:ring-indigo-550 font-medium"
+                        placeholder="구간 이름을 입력하세요"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">📝 메모 / 설명</label>
+                      <input
+                        type="text"
+                        value={editNotes}
+                        onChange={(e) => setEditNotes(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-850 rounded-xl px-2.5 py-1 text-xs text-slate-205 focus:outline-none focus:border-indigo-550 focus:ring-1 focus:ring-indigo-550"
+                        placeholder="메모를 입력하세요 (선택)"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-1.5 pt-1">
+                      <button
+                        onClick={() => setEditingBmId(null)}
+                        type="button"
+                        className="px-2.5 py-1 text-[11px] bg-slate-900 hover:bg-slate-850 text-slate-450 rounded-lg cursor-pointer transition-colors border border-slate-800"
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (onUpdateBookmark && editTitle.trim()) {
+                            onUpdateBookmark(bm.id, {
+                              title: editTitle.trim(),
+                              notes: editNotes.trim()
+                            });
+                          }
+                          setEditingBmId(null);
+                        }}
+                        type="button"
+                        className="px-2.5 py-1 text-[11px] bg-indigo-650 hover:bg-indigo-550 text-white font-bold rounded-lg cursor-pointer transition-colors"
+                      >
+                        저장
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {/* The green primary pill for the Bookmark Title as requested */}
+                    <div className="flex items-start">
+                      <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold px-3 py-2 rounded-xl inline-flex items-center gap-1.5 leading-normal w-full whitespace-normal break-all shadow-sm">
+                        📌 {bm.title}
                       </span>
+                    </div>
+                    
+                    {/* Folder label (if present) to keep folder organization useful but clean */}
+                    {(fDetails || bm.speed !== 1 || bm.videoId !== currentVideoId || bm.notes) && (
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1 px-0.5">
+                        {fDetails && col && (
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${col.class} text-slate-950 inline-flex items-center gap-0.5`}>
+                            <FolderIcon className="w-2.5 h-2.5" />
+                            {fDetails.name}
+                          </span>
+                        )}
+                        {bm.speed !== 1 && (
+                          <span className="bg-slate-950 text-slate-400 text-[9.5px] font-mono px-1.5 py-0.5 rounded border border-slate-850">
+                            ⚡ {bm.speed.toFixed(2)}x
+                          </span>
+                        )}
+                        {bm.videoId !== currentVideoId && (
+                          <span className="text-[9px] text-amber-500 font-bold bg-amber-950/20 border border-amber-900/20 rounded px-1.5 py-0.5 animate-pulse">
+                            ⚠️ 타 비디오
+                          </span>
+                        )}
+                        {bm.notes && (
+                          <span className="text-[10px] text-slate-400 italic bg-slate-950/40 px-2 py-0.5 rounded border border-slate-850 max-w-full truncate" title={bm.notes}>
+                            {bm.notes}
+                          </span>
+                        )}
+                      </div>
                     )}
-                    {/* Duration badge */}
-                    <span className="bg-indigo-950/80 text-indigo-300 text-[10px] font-mono font-semibold px-2 py-0.5 rounded-lg border border-indigo-900/30">
-                      ⏱️ {formatTime(bm.startTime)} ~ {formatTime(bm.endTime)}
-                    </span>
-                    <span className="bg-slate-950 text-slate-350 text-[10px] font-mono px-2 py-0.5 rounded-lg border border-slate-800">
-                      ⚡ {bm.speed.toFixed(2)}x 배속 권장
-                    </span>
+                  </div>
+                )}
+
+                {/* Row 4: Action button list */}
+                <div className="flex items-center justify-between gap-2 border-t border-slate-800/40 pt-2.5 mt-1">
+                  
+                  {/* Left side actions (Load buttons) */}
+                  <div className="flex items-center gap-1.5 flex-1 max-w-md">
+                    <button
+                      onClick={() => onSelectBookmark(bm, false)}
+                      type="button"
+                      className="flex-1 max-w-[130px] flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all hover:scale-[1.01] cursor-pointer"
+                    >
+                      <Play className="w-3 h-3 text-slate-400" />
+                      <span>구간 즉시 로드</span>
+                    </button>
+
+                    <button
+                      onClick={() => onSelectBookmark(bm, true)}
+                      type="button"
+                      className="flex-1 max-w-[130px] flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-[1.01] shadow-md shadow-indigo-950/20 cursor-pointer"
+                    >
+                      <Play className="w-3 h-3 fill-current text-white animate-pulse" />
+                      <span>자동 플레이</span>
+                    </button>
                   </div>
 
-                  <h5 className="font-sans font-bold text-sm text-slate-200 mt-1 truncate">
-                    {bm.title}
-                  </h5>
+                  {/* Right side actions (Edit and Remove buttons) */}
+                  <div className="flex items-center gap-1.2 shrink-0">
+                    <button
+                      onClick={() => {
+                        if (editingBmId === bm.id) {
+                          setEditingBmId(null);
+                        } else {
+                          setEditingBmId(bm.id);
+                          setEditTitle(bm.title);
+                          setEditNotes(bm.notes || "");
+                        }
+                      }}
+                      type="button"
+                      title="구간 세부 정보 수정"
+                      className={`p-1.5 rounded-xl border transition-all cursor-pointer ${
+                        editingBmId === bm.id
+                          ? "bg-indigo-600 text-white border-indigo-500"
+                          : "bg-slate-950 border border-slate-800/80 text-slate-400 hover:text-indigo-400 hover:border-indigo-900/30"
+                      }`}
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
 
-                  {/* Notes / Subtitle annotation memo */}
-                  {bm.notes && (
-                    <p className="text-[11.5px] text-slate-405 italic flex items-center gap-1 text-slate-400">
-                      <FileText className="w-3.5 h-3.5 text-slate-500" />
-                      {bm.notes}
-                    </p>
-                  )}
+                    <button
+                      onClick={() => {
+                        if (deletingBookmarkId === bm.id) {
+                          onDeleteBookmark(bm.id);
+                          setDeletingBookmarkId(null);
+                        } else {
+                          setDeletingBookmarkId(bm.id);
+                          // Auto-reset after 3 seconds
+                          setTimeout(() => setDeletingBookmarkId((prev) => (prev === bm.id ? null : prev)), 3000);
+                        }
+                      }}
+                      type="button"
+                      title={deletingBookmarkId === bm.id ? "정말 삭제하시겠습니까? (다시 클릭)" : "구간 삭제"}
+                      className={`px-2.5 py-1.5 rounded-xl border transition-all text-xs font-bold cursor-pointer ${
+                        deletingBookmarkId === bm.id
+                          ? "bg-rose-500 hover:bg-rose-600 text-white border-rose-450 animate-pulse font-bold"
+                          : "bg-slate-950 border border-slate-800/80 text-slate-500 hover:text-rose-400 hover:border-rose-900/30"
+                      }`}
+                    >
+                      {deletingBookmarkId === bm.id ? "정말삭제?" : <Trash2 className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
 
-                  {/* Tags list */}
-                  {bm.tags && bm.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {bm.tags.map((tag, idx) => (
-                        <span key={idx} className="text-[9.5px] text-teal-300 bg-teal-950/40 border border-teal-900/30 rounded px-1.5 py-0.5 flex items-center gap-0.5">
-                          <Tag className="w-2.5 h-2.5 opacity-60" />
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* If bookmarks is from a different Youtube Video */}
-                  {bm.videoId !== currentVideoId && (
-                    <div className="text-[10.5px] text-amber-400 bg-amber-950/20 border border-amber-900/10 rounded px-2 py-0.5 inline-block">
-                      ⚠️ 주의: 다른 동영상 소스입니다. 클릭 시 해당 비디오로 변환 및 탐색합니다.
-                    </div>
-                  )}
-                </div>
-
-                {/* Actions buttons segment */}
-                <div className="flex items-center gap-2 self-stretch md:self-auto justify-end border-t border-slate-800/45 pt-2.5 md:pt-0 md:border-0">
-                  <button
-                    onClick={() => onSelectBookmark(bm)}
-                    type="button"
-                    className="flex-1 md:flex-initial flex items-center justify-center gap-1 bg-indigo-500/20 hover:bg-indigo-500 text-indigo-300 hover:text-white border border-indigo-500/30 px-3.5 py-2 md:py-1.5 rounded-xl text-xs font-semibold transition-all group-hover:scale-102"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    구간 즉시 로드
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      if (confirm(`'${bm.title}' 구간을 즐겨찾기 목록에서 삭제하시겠습니까?`)) {
-                        onDeleteBookmark(bm.id);
-                      }
-                    }}
-                    type="button"
-                    title="북마크 삭제"
-                    className="p-2 rounded-xl bg-slate-950 border border-slate-800/80 hover:bg-rose-950/60 text-slate-500 hover:text-rose-400 hover:border-rose-900/30 transition-all"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
                 </div>
 
               </div>
