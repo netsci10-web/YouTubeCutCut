@@ -55,6 +55,12 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
+  const [activeBookmarkId, setActiveBookmarkId] = useState<string | null>(null);
+  const [isSequentialPlayActive, setIsSequentialPlayActive] = useState<boolean>(() => {
+    const saved = localStorage.getItem("yt_loop_sequential_play");
+    return saved === "true";
+  });
+
   const [folders, setFolders] = useState<Folder[]>(() => {
     const saved = localStorage.getItem("yt_loop_folders");
     if (saved) return JSON.parse(saved);
@@ -84,7 +90,8 @@ export default function App() {
   });
 
   // Loop settings
-  const [loopActive, setLoopActive] = useState(true);
+  const [loopActive, setLoopActive] = useState(false);
+  const [isRangeEnabled, setIsRangeEnabled] = useState(true);
   const [startTime, setStartTime] = useState(10);
   const [endTime, setEndTime] = useState(40);
   const [isStartSet, setIsStartSet] = useState(false);
@@ -101,6 +108,10 @@ export default function App() {
   };
 
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [playerVolume, setPlayerVolume] = useState<number>(() => {
+    const saved = localStorage.getItem("yt_loop_player_volume");
+    return saved ? parseInt(saved, 10) : 100;
+  });
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -121,6 +132,8 @@ export default function App() {
   const cooldownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const feedbackTimeoutRef = useRef<number | null>(null);
   const skipInitialResetRef = useRef<boolean>(false);
+  const loadedFromBookmarkRef = useRef<{ startTime: number; endTime: number } | null>(null);
+  const autoPlayIntentRef = useRef<boolean>(false);
 
   // --- Popout Mode Management for Second Monitor Fullscreen ---
   const popoutWindowRef = useRef<Window | null>(null);
@@ -133,6 +146,10 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchCollapsed, setSearchCollapsed] = useState<boolean>(() => {
+    const saved = localStorage.getItem("yt_loop_search_collapsed");
+    return saved === "true";
+  });
 
   const handleYoutubeSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -269,6 +286,10 @@ export default function App() {
   }, [bookmarks]);
 
   useEffect(() => {
+    localStorage.setItem("yt_loop_sequential_play", JSON.stringify(isSequentialPlayActive));
+  }, [isSequentialPlayActive]);
+
+  useEffect(() => {
     localStorage.setItem("yt_loop_folders", JSON.stringify(folders));
   }, [folders]);
 
@@ -301,6 +322,10 @@ export default function App() {
           skipInitialResetRef.current = false;
           setIsStartSet(true);
           setIsEndSet(true);
+          if (loadedFromBookmarkRef.current) {
+            setStartTime(loadedFromBookmarkRef.current.startTime);
+            setEndTime(loadedFromBookmarkRef.current.endTime);
+          }
         } else {
           setStartTime(0);
           setEndTime(data.duration || 300);
@@ -323,6 +348,10 @@ export default function App() {
           skipInitialResetRef.current = false;
           setIsStartSet(true);
           setIsEndSet(true);
+          if (loadedFromBookmarkRef.current) {
+            setStartTime(loadedFromBookmarkRef.current.startTime);
+            setEndTime(loadedFromBookmarkRef.current.endTime);
+          }
         } else {
           setStartTime(0);
           setEndTime(300);
@@ -360,8 +389,8 @@ export default function App() {
         if (typeof time === "number" && !isNaN(time)) {
           setCurrentTime(time);
 
-          // Loop repeat check bounding
-          if (loopActive && isEndSet && time >= endTime) {
+          // Loop repeat check bounding (only if range function is enabled)
+          if (isRangeEnabled && loopActive && isEndSet && time >= endTime) {
             handleRepeatReset();
           }
         }
@@ -373,7 +402,7 @@ export default function App() {
     return () => {
       if (loopIntervalRef.current) clearInterval(loopIntervalRef.current);
     };
-  }, [startTime, endTime, loopActive, isCooldownActive, cooldownDelay, countdownIntro, popoutActive]);
+  }, [startTime, endTime, loopActive, isRangeEnabled, isCooldownActive, cooldownDelay, countdownIntro, popoutActive]);
 
   // Web Audio synth chime to guide intervals nicely
   const playCountdownSynthTone = (freq: number, dur: number) => {
@@ -395,9 +424,41 @@ export default function App() {
     }
   };
 
+  // Play the next bookmark in the checked playlist sequentially
+  const playNextSequentialBookmark = (direction: "forward" | "backward" = "forward") => {
+    const checkedBMs = bookmarks.filter((bm) => bm.checked !== false);
+    if (checkedBMs.length === 0) {
+      if (playerRef.current) {
+        playerRef.current.seekTo(startTime, true);
+        setCurrentTime(startTime);
+      }
+      return;
+    }
+
+    let nextIndex = 0;
+    const currentIndex = checkedBMs.findIndex((bm) => bm.id === activeBookmarkId);
+    if (currentIndex === -1) {
+      nextIndex = direction === "forward" ? 0 : checkedBMs.length - 1;
+    } else {
+      if (direction === "forward") {
+        nextIndex = (currentIndex + 1) % checkedBMs.length;
+      } else {
+        nextIndex = (currentIndex - 1 + checkedBMs.length) % checkedBMs.length;
+      }
+    }
+
+    const nextBM = checkedBMs[nextIndex];
+    handleSelectBookmark(nextBM, true);
+  };
+
   // Restarts playback loop with optional cooldown pauses and countdowns
   const handleRepeatReset = () => {
     if (!playerRef.current) return;
+
+    if (isSequentialPlayActive) {
+      playNextSequentialBookmark("forward");
+      return;
+    }
 
     if (cooldownDelay > 0) {
       // Pause active playback
@@ -503,6 +564,16 @@ export default function App() {
           const duration = event.target.getDuration();
           if (duration && duration > 0) {
             setVideoMeta(prev => ({ ...prev, duration }));
+          }
+
+          let localStart = startTime;
+          if (loadedFromBookmarkRef.current) {
+            localStart = loadedFromBookmarkRef.current.startTime;
+            setStartTime(loadedFromBookmarkRef.current.startTime);
+            setEndTime(loadedFromBookmarkRef.current.endTime);
+            setIsStartSet(true);
+            setIsEndSet(true);
+          } else if (duration && duration > 0) {
             setEndTime(duration);
           }
 
@@ -510,30 +581,64 @@ export default function App() {
           // 그 뒤 즉각적인 일시정지(pauseVideo) 및 unmute를 실행하여 비디오를 활성화 & 대기 상태로 맞춥니다.
           try {
             event.target.mute();
-            event.target.seekTo(startTime, true);
+            event.target.seekTo(localStart, true);
             event.target.playVideo();
           } catch (e) {}
+
+          const shouldKeepPlaying = autoPlayIntentRef.current;
 
           setTimeout(() => {
             try {
               if (event.target) {
-                if (typeof event.target.pauseVideo === "function") {
-                  event.target.pauseVideo();
-                }
-                if (typeof event.target.seekTo === "function") {
-                  event.target.seekTo(startTime, true);
-                }
-                if (typeof event.target.unmute === "function") {
-                  event.target.unmute();
+                if (shouldKeepPlaying) {
+                  if (typeof event.target.playVideo === "function") {
+                    event.target.playVideo();
+                  }
+                  if (typeof event.target.seekTo === "function") {
+                    event.target.seekTo(localStart, true);
+                  }
+                  if (typeof event.target.unmute === "function") {
+                    event.target.unmute();
+                  }
+                  if (typeof event.target.setVolume === "function") {
+                    event.target.setVolume(playerVolume);
+                  }
+                  setIsPlaying(true);
+                } else {
+                  if (typeof event.target.pauseVideo === "function") {
+                    event.target.pauseVideo();
+                  }
+                  if (typeof event.target.seekTo === "function") {
+                    event.target.seekTo(localStart, true);
+                  }
+                  if (typeof event.target.unmute === "function") {
+                    event.target.unmute();
+                  }
+                  if (typeof event.target.setVolume === "function") {
+                    event.target.setVolume(playerVolume);
+                  }
+                  setIsPlaying(false);
                 }
               }
             } catch (e) {}
-            setIsPlaying(false);
-          }, 350);
+            // Clear refs after loading completes
+            loadedFromBookmarkRef.current = null;
+            autoPlayIntentRef.current = false;
+          }, 450);
         },
         onStateChange: (event: any) => {
           // YT.PlayerState.PLAYING = 1, PAUSED = 2
           if (event.data === 1) {
+            // Apply volume & mute settings robustly on play events
+            try {
+              if (typeof event.target.unmute === "function") {
+                event.target.unmute();
+              }
+              if (typeof event.target.setVolume === "function") {
+                event.target.setVolume(playerVolume);
+              }
+            } catch (volErr) {}
+
             if (popoutActive) {
               // 듀얼모니터 전송 중에는 메인 영상이 플레이되는 것을 방지합니다.
               try {
@@ -564,9 +669,17 @@ export default function App() {
       showTemporaryNotification("올바른 유튜브 링크 또는 ID를 작성해주세요 ⚠️");
       return;
     }
+    setPlayerVolume(100);
+    localStorage.setItem("yt_loop_player_volume", "100");
+    if (playerRef.current && iframeReadyRef.current) {
+      try {
+        playerRef.current.setVolume(100);
+        playerRef.current.unmute();
+      } catch (e) {}
+    }
     setActiveVideoId(freshId);
     setVideoIdInput("");
-    showTemporaryNotification("유튜브 동영상이 로드되었습니다 ✨");
+    showTemporaryNotification("유튜브 동영상이 로드되었습니다 ✨ (소리 크기가 최대 100%로 설정됨 🔊)");
   };
 
   // Speed handler adjustments
@@ -577,6 +690,19 @@ export default function App() {
       playerRef.current.setPlaybackRate(clamped);
     }
     showTemporaryNotification(`배속 속도 조절 완료: ${clamped.toFixed(2)}x`);
+  };
+
+  // Volume handler adjustments
+  const changeVolume = (val: number) => {
+    const clamped = Math.max(0, Math.min(100, val));
+    setPlayerVolume(clamped);
+    localStorage.setItem("yt_loop_player_volume", clamped.toString());
+    if (playerRef.current && iframeReadyRef.current) {
+      try {
+        playerRef.current.setVolume(clamped);
+        playerRef.current.unmute();
+      } catch (e) {}
+    }
   };
 
   // Player Play/Pause toggles
@@ -750,10 +876,16 @@ export default function App() {
   };
 
   const handleSelectBookmark = (bm: Bookmark, autoPlay?: boolean) => {
+    autoPlayIntentRef.current = !!autoPlay;
+    setActiveBookmarkId(bm.id);
+    
     // If different video, swap sources first
     if (bm.videoId !== activeVideoId) {
       skipInitialResetRef.current = true;
+      loadedFromBookmarkRef.current = { startTime: bm.startTime, endTime: bm.endTime };
       setActiveVideoId(bm.videoId);
+    } else {
+      loadedFromBookmarkRef.current = null;
     }
     
     // Set parameters
@@ -762,7 +894,20 @@ export default function App() {
     setIsStartSet(true);
     setIsEndSet(true);
     setLoopActive(true);
+    setIsRangeEnabled(true);
     setPlaybackSpeed(bm.speed);
+
+    // Restore saved volume if it exists
+    if (bm.volume !== undefined) {
+      setPlayerVolume(bm.volume);
+      localStorage.setItem("yt_loop_player_volume", bm.volume.toString());
+      if (playerRef.current && iframeReadyRef.current) {
+        try {
+          playerRef.current.setVolume(bm.volume);
+          playerRef.current.unmute();
+        } catch (e) {}
+      }
+    }
     
     if (playerRef.current && iframeReadyRef.current) {
       playerRef.current.setPlaybackRate(bm.speed);
@@ -794,6 +939,36 @@ export default function App() {
     showTemporaryNotification("구간 정보가 성공적으로 수정되었습니다! 📁");
   };
 
+  const handleToggleBookmarkChecked = (id: string) => {
+    setBookmarks((prev) =>
+      prev.map((bm) => (bm.id === id ? { ...bm, checked: !(bm.checked ?? true) } : bm))
+    );
+  };
+
+  const handleMoveBookmarkUp = (id: string) => {
+    setBookmarks((prev) => {
+      const idx = prev.findIndex((bm) => bm.id === id);
+      if (idx <= 0) return prev;
+      const copy = [...prev];
+      const temp = copy[idx];
+      copy[idx] = copy[idx - 1];
+      copy[idx - 1] = temp;
+      return copy;
+    });
+  };
+
+  const handleMoveBookmarkDown = (id: string) => {
+    setBookmarks((prev) => {
+      const idx = prev.findIndex((bm) => bm.id === id);
+      if (idx === -1 || idx >= prev.length - 1) return prev;
+      const copy = [...prev];
+      const temp = copy[idx];
+      copy[idx] = copy[idx + 1];
+      copy[idx + 1] = temp;
+      return copy;
+    });
+  };
+
   const handleImportData = (newBms: Bookmark[], newFolders: Folder[]) => {
     if (newBms.length > 0) setBookmarks(newBms);
     if (newFolders.length > 0) setFolders(newFolders);
@@ -814,6 +989,7 @@ export default function App() {
       startTime,
       endTime,
       speed: playbackSpeed,
+      volume: playerVolume,
       notes: "빠른 추가 구간",
       tags: [],
       folderId: ""
@@ -1003,18 +1179,40 @@ export default function App() {
                 <span>메인 동영상 화면 크기 조절</span>
               </div>
               <div className="flex items-center gap-3.5">
+                {/* Micro Adjusters with Plus and Minus Buttons */}
+                <div className="flex items-center gap-1 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800/60 select-none">
+                  <button
+                    type="button"
+                    onClick={() => setPlayerSize((prev) => Math.max(20, prev - 10))}
+                    className="w-5 h-5 rounded hover:bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center font-bold text-[10px] cursor-pointer"
+                    title="10% 축소"
+                  >
+                    －
+                  </button>
+                  <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider px-1">배율 조절</span>
+                  <button
+                    type="button"
+                    onClick={() => setPlayerSize((prev) => Math.min(100, prev + 10))}
+                    className="w-5 h-5 rounded hover:bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center font-bold text-[10px] cursor-pointer"
+                    title="10% 확대"
+                  >
+                    ＋
+                  </button>
+                </div>
+
                 {/* Preset shortcuts selector */}
                 <div className="flex items-center gap-1 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800/60">
                   {[
+                    { label: "아주작게 (30%)", val: 30 },
                     { label: "작게 (50%)", val: 50 },
                     { label: "중간 (75%)", val: 75 },
-                    { label: "기본 (100%)", val: 100 },
+                    { label: "최대 (100%)", val: 100 },
                   ].map((preset) => (
                     <button
                       key={preset.val}
                       type="button"
                       onClick={() => setPlayerSize(preset.val)}
-                      className={`px-2 py-1 rounded text-[10px] font-bold cursor-pointer transition-all ${
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition-all ${
                         playerSize === preset.val
                           ? "bg-indigo-600 text-white"
                           : "text-slate-400 hover:text-white hover:bg-slate-800"
@@ -1028,13 +1226,13 @@ export default function App() {
                 <div className="flex items-center gap-2 flex-1 sm:w-40">
                   <input
                     type="range"
-                    min="40"
+                    min="20"
                     max="100"
                     step="5"
                     value={playerSize}
                     onChange={(e) => setPlayerSize(Number(e.target.value))}
                     className="w-full accent-indigo-500 cursor-pointer h-1 bg-slate-800 rounded-lg appearance-none"
-                    style={{ background: `linear-gradient(to right, rgb(99, 102, 241) 0%, rgb(99, 102, 241) ${((playerSize - 40) / 60) * 100}%, rgb(30, 41, 59) ${((playerSize - 40) / 60) * 100}%, rgb(30, 41, 59) 100%)` }}
+                    style={{ background: `linear-gradient(to right, rgb(99, 102, 241) 0%, rgb(99, 102, 241) ${((playerSize - 20) / 80) * 100}%, rgb(30, 41, 59) ${((playerSize - 20) / 80) * 100}%, rgb(30, 41, 59) 100%)` }}
                   />
                   <span className="text-xs font-mono text-indigo-400 font-bold w-9 text-right block">
                     {playerSize}%
@@ -1141,52 +1339,36 @@ export default function App() {
             {/* Quick Micro Adjusters for Start & End Ranges */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4 items-stretch">
               
-              {/* Range A Set Deck */}
+              {/* Range A Set Deck - Now Sound & Playback Speed */}
               <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between">
                 <div>
-                  <div className="text-[11px] font-bold text-slate-400 px-0.5 flex items-center gap-1.5 mb-2.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    시작지점 (A) 미세조정 [Q]
+                  <div className="text-[11px] font-bold text-slate-400 px-0.5 flex items-center gap-1.5 mb-2.5 border-b border-slate-850 pb-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                    소리 및 재생 배속 설정
                   </div>
 
-                  {/* A지점 수동 조절 및 피드백 */}
-                  <div className="flex items-center gap-1.5 mt-2.5">
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max={endTime - 0.2}
-                      value={isStartSet ? startTime.toFixed(1) : ""}
-                      placeholder="미지정"
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        if (!isNaN(val)) {
-                          updateStartTime(Math.max(0, Math.min(val, endTime - 0.2)));
-                        } else {
-                          // Allow empty input without immediately triggering NaN error
-                          setStartTime(0);
-                          setIsStartSet(false);
-                        }
+                  {/* 소리 크기 (볼륨) 슬라이더 */}
+                  <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-2.5 mt-2.5 space-y-2">
+                    <div 
+                      onClick={() => {
+                        changeVolume(100);
+                        showTemporaryNotification("소리 크기가 100%로 초기화되었습니다 🔊");
                       }}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 font-mono focus:outline-none"
-                    />
-                    <span className="text-[10px] text-slate-500 font-mono">초</span>
-                    <div className="flex gap-1 flex-shrink-0">
-                      <button
-                        onClick={() => updateStartTime(Math.max(0, startTime - 1))}
-                        type="button"
-                        className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
-                      >
-                        -1s
-                      </button>
-                      <button
-                        onClick={() => updateStartTime(Math.min(endTime - 0.2, startTime + 1))}
-                        type="button"
-                        className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
-                      >
-                        +1s
-                      </button>
+                      className="flex items-center justify-between text-[10px] text-slate-400 font-bold px-0.5 cursor-pointer hover:text-indigo-300 transition-colors"
+                      title="클릭하여 100% 소리 크기로 초기화"
+                    >
+                      <span className="flex items-center gap-1">🔊 소리 설정 (볼륨)</span>
+                      <strong className="text-indigo-400 font-mono bg-indigo-500/10 px-1.5 py-0.5 rounded hover:bg-indigo-500 hover:text-slate-950 transition-all">{playerVolume}%</strong>
                     </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={playerVolume}
+                      onChange={(e) => changeVolume(parseInt(e.target.value, 10))}
+                      className="w-full accent-indigo-550 cursor-ew-resize h-1 bg-slate-800 rounded-lg appearance-none block"
+                    />
                   </div>
 
                   {/* 재생 속도 슬라이더 */}
@@ -1199,7 +1381,7 @@ export default function App() {
                       className="flex items-center justify-between text-[10px] text-slate-400 font-bold px-0.5 cursor-pointer hover:text-indigo-300 transition-colors"
                       title="클릭하여 1.00x 배속으로 초기화"
                     >
-                      <span className="flex items-center gap-1">⚡ 재생 속도 <span className="text-[8.5px] font-normal underline text-slate-500">(초기화)</span></span>
+                      <span className="flex items-center gap-1">⚡ 재생 속도</span>
                       <strong className="text-indigo-400 font-mono bg-indigo-500/10 px-1.5 py-0.5 rounded hover:bg-indigo-500 hover:text-slate-950 transition-all">{playbackSpeed.toFixed(2)}x</strong>
                     </div>
                     <input
@@ -1284,82 +1466,77 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {/* Range B Set Deck - Now Range Activation & repeat loop delay */}
               <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between">
                 <div>
-                  <div className="text-[11px] font-bold text-slate-400 px-0.5 flex items-center gap-1.5 mb-2.5">
+                  <div className="text-[11px] font-bold text-slate-400 px-0.5 flex items-center gap-1.5 mb-2.5 border-b border-slate-850 pb-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                    종료지점 (B) 미세조정 [W]
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-2.5">
-                    <input
-                      type="number"
-                      step="0.1"
-                      min={startTime + 0.2}
-                      max={videoMeta.duration}
-                      value={isEndSet ? endTime.toFixed(1) : ""}
-                      placeholder="미지정"
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        if (!isNaN(val)) {
-                          updateEndTime(Math.max(startTime + 0.2, Math.min(val, videoMeta.duration)));
-                        } else {
-                          // Allow empty input without immediately triggering NaN error
-                          setEndTime(videoMeta.duration || 300);
-                          setIsEndSet(false);
-                        }
-                      }}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 font-mono focus:outline-none"
-                    />
-                    <span className="text-[10px] text-slate-500 font-mono">초</span>
-                    <div className="flex gap-1 flex-shrink-0">
-                      <button
-                        onClick={() => updateEndTime(Math.max(startTime + 0.2, endTime - 1))}
-                        type="button"
-                        className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
-                      >
-                        -1s
-                      </button>
-                      <button
-                        onClick={() => updateEndTime(Math.min(videoMeta.duration, endTime + 1))}
-                        type="button"
-                        className="px-1.5 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded text-slate-300 font-mono"
-                      >
-                        +1s
-                      </button>
-                    </div>
+                    구간 기능 및 반복 제어
                   </div>
 
-                  {/* 반복 & 지연 정지 대기 (1줄 배치) */}
-                  <div className="flex items-center gap-1.5 mt-3 pt-2.5 border-t border-slate-900/60 select-none">
+                  {/* 구간 기능 켜기/끄기 토글 버튼 */}
+                  <div className="mt-2 select-none">
                     <button
-                      onClick={() => setLoopActive(!loopActive)}
+                      onClick={() => {
+                        const nextVal = !isRangeEnabled;
+                        setIsRangeEnabled(nextVal);
+                        showTemporaryNotification(
+                          nextVal
+                            ? "구간 기능이 활성화되었습니다 🔁 (지정 구간 반복)"
+                            : "구간 기능이 비활성화되었습니다 ⏹️ (전체 동영상 재생)"
+                        );
+                      }}
                       type="button"
-                      title={`반복 상태 토글 (단축키: ${hotkeys.loopToggle})`}
-                      className={`flex-1 flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
-                        loopActive
-                          ? "bg-indigo-600/30 text-indigo-400 border-indigo-500/40"
-                          : "bg-slate-900 text-slate-400 border-slate-800"
+                      className={`w-full py-2.5 px-3 rounded-xl text-[11px] font-bold transition-all flex items-center justify-between border cursor-pointer ${
+                        isRangeEnabled
+                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-450 hover:bg-emerald-500/15"
+                          : "bg-slate-900/60 border-slate-850 text-slate-500 hover:bg-slate-900 hover:text-slate-350"
                       }`}
                     >
-                      <div className="flex items-center gap-1.5 text-left text-[11px]">
-                        <span className={`w-1.5 h-1.5 rounded-full inline-block ${loopActive ? "bg-indigo-400 animate-pulse" : "bg-slate-650"}`} />
-                        <span>반복 [{hotkeys.loopToggle}]</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full inline-block ${isRangeEnabled ? "bg-emerald-450 animate-pulse" : "bg-slate-700"}`} />
+                        <span>구간 기능 사용하기</span>
                       </div>
-                      <span className="text-[9.5px] text-indigo-400 bg-indigo-500/10 px-1 py-0.5 rounded leading-none shrink-0 font-bold">
-                        {loopActive ? "켜짐" : "꺼짐"}
+                      <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded leading-none ${
+                        isRangeEnabled ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-800 text-slate-500"
+                      }`}>
+                        {isRangeEnabled ? "ON" : "OFF"}
                       </span>
                     </button>
+                  </div>
 
-                    <div className="flex-1 flex items-center justify-between bg-slate-900 border border-slate-800 py-1.5 px-2.5 rounded-lg text-[11px] text-slate-300 h-[30px]">
-                      <span className="text-slate-405 font-bold shrink-0">지연 정지:</span>
+                  {/* 구간반복 토글 & 지연 정지 컨트롤 */}
+                  <div className="grid grid-cols-2 gap-2 mt-2 select-none font-sans">
+                    <button
+                      onClick={() => {
+                        const nextVal = !loopActive;
+                        setLoopActive(nextVal);
+                        showTemporaryNotification(
+                          nextVal ? "구간 반복 재생이 켜졌습니다 🔁" : "구간 반복 재생이 꺼졌습니다 ⏹️"
+                        );
+                      }}
+                      type="button"
+                      className={`h-[38px] px-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                        loopActive
+                          ? "bg-indigo-600/35 border-indigo-500/50 text-indigo-300 shadow-md ring-1 ring-indigo-500/20"
+                          : "bg-slate-900/60 text-slate-450 border-slate-850 hover:border-slate-800 hover:text-slate-350"
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full inline-block ${loopActive ? "bg-emerald-400 animate-pulse" : "bg-slate-700"}`} />
+                      구간반복 {loopActive ? "켜짐" : "꺼짐"}
+                    </button>
+
+                    <div className="flex items-center justify-between bg-slate-900/90 border border-slate-850 px-2 rounded-xl h-[38px]">
+                      <span className="text-[10px] text-slate-450 font-bold shrink-0">⏱️ 지연:</span>
                       <select
                         value={cooldownDelay}
                         onChange={(e) => setCooldownDelay(parseInt(e.target.value))}
-                        className="bg-transparent border-0 text-amber-450 font-bold focus:outline-none cursor-pointer outline-none font-sans text-[11px] pr-1"
+                        className="bg-transparent border-0 text-amber-450 font-bold focus:outline-none cursor-pointer outline-none font-sans text-[11px] shrink-0 pr-1"
                       >
-                        <option value={0} className="bg-slate-900">없음 (0초)</option>
+                        <option value={0} className="bg-slate-950 text-slate-300">없음</option>
                         {Array.from({ length: 10 }, (_, i) => i + 1).map((sec) => (
-                          <option key={sec} value={sec} className="bg-slate-900">
+                          <option key={sec} value={sec} className="bg-slate-950 text-slate-300">
                             {sec}초
                           </option>
                         ))}
@@ -1367,39 +1544,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 현구간 추가 & 내보내기 / 읽어오기 버튼 줄 */}
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <button
-                      onClick={handleQuickAddBookmark}
-                      type="button"
-                      className="flex-1 flex items-center justify-center gap-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-3 py-1.5 rounded-full text-[11px] transition-all hover:scale-102 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5 text-slate-950 font-bold shrink-0" />
-                      <span>현구간 추가</span>
-                    </button>
-                    
-                    <button
-                      onClick={handleQuickExportBookmarks}
-                      type="button"
-                      title="구간 백업 내보내기 (JSON)"
-                      className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors shrink-0 cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                    </button>
 
-                    <label
-                      title="구간 백업 불러오기 (JSON)"
-                      className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors cursor-pointer shrink-0"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <input
-                        type="file"
-                        accept=".json"
-                        onChange={handleQuickImportBookmarks}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
                 </div>
               </div>
 
@@ -1412,87 +1557,104 @@ export default function App() {
         <aside className="lg:col-span-5 xl:col-span-4 bg-slate-950/40 rounded-3xl p-4 border border-slate-800 space-y-4">
           
           {/* 유튜브 동영상 검색 (YouTube Video Search) */}
-          <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-indigo-300 flex items-center gap-2 font-display">
+          <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 space-y-3 transition-all duration-300">
+            <div 
+              onClick={() => {
+                const nextVal = !searchCollapsed;
+                setSearchCollapsed(nextVal);
+                localStorage.setItem("yt_loop_search_collapsed", String(nextVal));
+              }}
+              className="flex items-center justify-between cursor-pointer select-none group"
+            >
+              <h4 className="text-xs font-bold text-indigo-300 flex items-center gap-2 font-display group-hover:text-indigo-200 transition-colors">
                 <Search className="w-3.5 h-3.5 text-indigo-400" />
-                유튜브 동영상 검색
+                <span>유튜브 동영상 검색</span>
               </h4>
-              {searchResults.length > 0 && (
-                <button
-                  onClick={() => {
-                    setSearchResults([]);
-                    setSearchQuery("");
-                  }}
-                  className="text-[10px] text-slate-450 hover:text-rose-400 transition-colors font-medium"
-                  type="button"
-                >
-                  결과 지우기
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {searchResults.length > 0 && !searchCollapsed && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSearchResults([]);
+                      setSearchQuery("");
+                    }}
+                    className="text-[10px] text-slate-400 hover:text-rose-400 transition-colors font-medium mr-1.5"
+                    type="button"
+                  >
+                    결과 지우기
+                  </button>
+                )}
+                <span className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-300 transition-colors bg-slate-950/80 border border-slate-800 rounded px-1.5 py-0.5 select-none text-[9.5px]">
+                  {searchCollapsed ? "원격 검색 펼치기 ＋" : "검색 기능 접기 －"}
+                </span>
+              </div>
             </div>
 
-            <form onSubmit={handleYoutubeSearch} className="flex gap-1.5">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  placeholder="검색 키워드 입력..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-950/80 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={isSearching}
-                className="bg-indigo-650 hover:bg-indigo-550 text-white px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors flex items-center gap-1 disabled:opacity-50 shrink-0 cursor-pointer"
-              >
-                {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-200" /> : <Search className="w-3.5 h-3.5" />}
-                <span>검색</span>
-              </button>
-            </form>
+            {!searchCollapsed && (
+              <div className="space-y-3 pt-1">
+                <form onSubmit={handleYoutubeSearch} className="flex gap-1.5">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      placeholder="검색 키워드 입력..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-slate-950/80 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSearching}
+                    className="bg-indigo-650 hover:bg-indigo-550 text-white px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors flex items-center gap-1 disabled:opacity-50 shrink-0 cursor-pointer"
+                  >
+                    {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-200" /> : <Search className="w-3.5 h-3.5" />}
+                    <span>검색</span>
+                  </button>
+                </form>
 
-            {/* 에러 피드백 */}
-            {searchError && (
-              <div className="text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl p-2 font-medium">
-                ⚠️ {searchError}
-              </div>
-            )}
+                {/* 에러 피드백 */}
+                {searchError && (
+                  <div className="text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl p-2 font-medium">
+                    ⚠️ {searchError}
+                  </div>
+                )}
 
-            {/* 검색 결과 리스트 */}
-            {searchResults.length > 0 && (
-              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-850">
-                {searchResults.map((item) => {
-                  const isCurrent = item.id === activeVideoId;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        loadNewVideo(item.id);
-                      }}
-                      type="button"
-                      className={`w-full p-2 rounded-xl text-left border flex items-start gap-2.5 transition-all text-xs cursor-pointer ${
-                        isCurrent
-                          ? "bg-indigo-950/40 border-indigo-500/80"
-                          : "bg-slate-950/50 hover:bg-slate-950 border-slate-900/60 hover:border-slate-800"
-                      }`}
-                    >
-                      <img
-                        src={item.thumbnail}
-                        alt=""
-                        className="w-16 h-10 object-cover rounded-lg bg-slate-900 border border-slate-850 shrink-0"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <h5 className="font-semibold text-slate-200 line-clamp-2 leading-tight text-[11px]" title={item.title}>
-                          {item.title}
-                        </h5>
-                        <p className="text-[10px] text-indigo-400/80 mt-1 truncate font-mono">
-                          📺 {item.channelTitle}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
+                {/* 검색 결과 리스트 */}
+                {searchResults.length > 0 && (
+                  <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-850">
+                    {searchResults.map((item) => {
+                      const isCurrent = item.id === activeVideoId;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            loadNewVideo(item.id);
+                          }}
+                          type="button"
+                          className={`w-full p-2 rounded-xl text-left border flex items-start gap-2.5 transition-all text-xs cursor-pointer ${
+                            isCurrent
+                              ? "bg-indigo-950/40 border-indigo-500/80"
+                              : "bg-slate-950/50 hover:bg-slate-950 border-slate-900/60 hover:border-slate-800"
+                          }`}
+                        >
+                          <img
+                            src={item.thumbnail}
+                            alt=""
+                            className="w-16 h-10 object-cover rounded-lg bg-slate-900 border border-slate-850 shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <h5 className="font-semibold text-slate-200 line-clamp-2 leading-tight text-[11px]" title={item.title}>
+                              {item.title}
+                            </h5>
+                            <p className="text-[10px] text-indigo-400/80 mt-1 truncate font-mono">
+                              📺 {item.channelTitle}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1506,6 +1668,15 @@ export default function App() {
             currentA={startTime}
             currentB={endTime}
             currentSpeed={playbackSpeed}
+            currentVolume={playerVolume}
+            activeBookmarkId={activeBookmarkId}
+            isSequentialPlayActive={isSequentialPlayActive}
+            onToggleSequentialPlay={() => setIsSequentialPlayActive((prev) => !prev)}
+            onToggleBookmarkChecked={handleToggleBookmarkChecked}
+            onMoveBookmarkUp={handleMoveBookmarkUp}
+            onMoveBookmarkDown={handleMoveBookmarkDown}
+            onPlayNext={() => playNextSequentialBookmark("forward")}
+            onPlayPrev={() => playNextSequentialBookmark("backward")}
             onAddBookmark={handleAddBookmark}
             onDeleteBookmark={handleDeleteBookmark}
             onAddFolder={handleAddFolder}

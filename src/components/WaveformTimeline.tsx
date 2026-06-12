@@ -148,42 +148,98 @@ export function WaveformTimeline({
   return (
     <div className="w-full select-none mt-2">
       {/* Visual coordinates metadata */}
-      <div className="flex justify-between items-center text-xs text-slate-400 font-mono mb-2 px-1">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onChangeStart(Math.max(0, Math.min(currentTime, endTime - 0.2)));
-          }}
-          type="button"
-          title="현재 재생 위치를 시작지점(A)으로 지정 [단축키: Q]"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-emerald-500/10 active:scale-95 border border-slate-800 hover:border-emerald-500/30 text-slate-300 transition-all cursor-pointer font-sans"
-        >
-          <span className={`w-2 h-2 rounded-full ring-2 ring-emerald-950 inline-block ${isStartSet ? "bg-emerald-500" : "bg-slate-600 animate-pulse"}`}></span>
-          <span className="text-slate-300 font-semibold text-xs">시작지점 (A):</span>
-          <strong className={`font-mono text-xs ${isStartSet ? "text-emerald-400" : "text-slate-550"}`}>
-            {isStartSet ? formatTime(startTime) : "지정하기"}
-          </strong>
-        </button>
+      <div className="flex justify-between items-center text-xs text-slate-400 font-mono mb-2 px-1 gap-4 flex-wrap sm:flex-nowrap">
+        {/* 시작지점 (A)와 미세조정 */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onChangeStart(Math.max(0, Math.min(currentTime, endTime - 0.2)));
+            }}
+            type="button"
+            title="현재 재생 위치를 시작지점(A)으로 지정 [단축키: Q]"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-emerald-500/10 active:scale-95 border border-slate-800 hover:border-emerald-500/30 text-slate-300 transition-all cursor-pointer font-sans h-9"
+          >
+            <span className={`w-2 h-2 rounded-full ring-2 ring-emerald-950 inline-block ${isStartSet ? "bg-emerald-500" : "bg-slate-600 animate-pulse"}`}></span>
+            <span className="text-slate-300 font-semibold text-xs text-[11px]">시작지점 (A):</span>
+            <strong className={`font-mono text-xs ${isStartSet ? "text-emerald-400" : "text-slate-550"} text-[11px]`}>
+              {isStartSet ? formatTime(startTime) : "지정하기"}
+            </strong>
+          </button>
+          
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onChangeStart(Math.max(0, startTime - 1));
+              }}
+              type="button"
+              className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
+              title="시작 시점 1초 앞으로 당기기"
+            >
+              -1s
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onChangeStart(Math.min(endTime - 0.2, startTime + 1));
+              }}
+              type="button"
+              className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
+              title="시작 시점 1초 뒤로 미루기"
+            >
+              +1s
+            </button>
+          </div>
+        </div>
 
-        <span className="text-slate-400 font-sans text-xs bg-slate-950/40 border border-slate-900 px-3 py-1.5 rounded-xl">
-          현재: <strong className="text-sky-300 font-mono font-bold">{formatTime(currentTime)}</strong>
+        <span className="text-slate-400 font-sans text-xs bg-slate-950/40 border border-slate-900 px-3 py-1.5 rounded-xl h-9 flex items-center shrink-0">
+          현재: <strong className="text-sky-300 font-mono font-bold ml-1">{formatTime(currentTime)}</strong>
         </span>
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onChangeEnd(Math.max(startTime + 0.2, Math.min(currentTime, duration)));
-          }}
-          type="button"
-          title="현재 재생 위치를 종료지점(B)으로 지정 [단축키: W]"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-rose-500/10 active:scale-95 border border-slate-800 hover:border-rose-500/30 text-slate-300 transition-all cursor-pointer font-sans"
-        >
-          <span className="text-slate-300 font-semibold text-xs">종료지점 (B):</span>
-          <strong className={`font-mono text-xs ${isEndSet ? "text-rose-400" : "text-slate-550"}`}>
-            {isEndSet ? formatTime(endTime) : "지정하기"}
-          </strong>
-          <span className={`w-2 h-2 rounded-full ring-2 ring-rose-950 inline-block ${isEndSet ? "bg-rose-500" : "bg-slate-600 animate-pulse"}`}></span>
-        </button>
+        {/* 종료지점 (B)와 미세조정 */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onChangeEnd(Math.max(startTime + 0.2, endTime - 1));
+              }}
+              type="button"
+              className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
+              title="종료 시점 1초 앞으로 당기기"
+            >
+              -1s
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onChangeEnd(Math.min(duration, endTime + 1));
+              }}
+              type="button"
+              className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
+              title="종료 시점 1초 뒤로 미루기"
+            >
+              +1s
+            </button>
+          </div>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onChangeEnd(Math.max(startTime + 0.2, Math.min(currentTime, duration)));
+            }}
+            type="button"
+            title="현재 재생 위치를 종료지점(B)으로 지정 [단축키: W]"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-rose-500/10 active:scale-95 border border-slate-800 hover:border-rose-500/30 text-slate-300 transition-all cursor-pointer font-sans h-9"
+          >
+            <span className="text-slate-300 font-semibold text-xs text-[11px]">종료지점 (B):</span>
+            <strong className={`font-mono text-xs ${isEndSet ? "text-rose-400" : "text-slate-550"} text-[11px]`}>
+              {isEndSet ? formatTime(endTime) : "지정하기"}
+            </strong>
+            <span className={`w-2 h-2 rounded-full ring-2 ring-rose-950 inline-block ${isEndSet ? "bg-rose-500" : "bg-slate-600 animate-pulse"}`}></span>
+          </button>
+        </div>
       </div>
 
       <div

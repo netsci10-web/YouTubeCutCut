@@ -11,6 +11,8 @@ export interface Bookmark {
   tags: string[];
   folderId: string;
   createdAt: number;
+  checked?: boolean;
+  volume?: number;
 }
 
 export interface Folder {
