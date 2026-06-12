@@ -11,7 +11,7 @@
     <!-- SVG Favicon / Icon link representing CutCut -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='192' height='192' viewBox='0 0 192 192'><rect width='192' height='192' rx='42' fill='%23020617'/><path d='M60 50l90 46-90 46V50z' fill='%2310b981'/><circle cx='96' cy='96' r='76' fill='none' stroke='%230ea5e9' stroke-width='8'/></svg>" />
     <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='192' height='192' viewBox='0 0 192 192'><rect width='192' height='192' rx='42' fill='%23020617'/><path d='M60 50l90 46-90 46V50z' fill='%2310b981'/><circle cx='96' cy='96' r='76' fill='none' stroke='%230ea5e9' stroke-width='8'/></svg>" />
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="manifest.json" />
 
     <title>YouTube CutCut - 유튜브 구간 반복 학습기</title>
   </head>
@@ -19,13 +19,22 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
 
-    <!-- Register service worker safely -->
+    <!-- Unregister stale service worker and clear old caches to prevent blank screen traps from previous builds -->
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('ServiceWorker registered:', reg.scope))
-            .catch(err => console.error('ServiceWorker registration failed:', err));
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (let registration of registrations) {
+            registration.unregister().then(() => {
+              console.log('Stale service worker unregistered successfully.');
+            });
+          }
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then((names) => {
+          for (let name of names) {
+            caches.delete(name);
+          }
         });
       }
     </script>

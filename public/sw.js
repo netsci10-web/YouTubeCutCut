@@ -1,9 +1,8 @@
 const CACHE_NAME = 'cutcut-v1';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/src/main.tsx',
-  '/manifest.json'
+  './',
+  'index.html',
+  'manifest.json'
 ];
 
 // Install Event
@@ -58,7 +57,7 @@ self.addEventListener('fetch', (e) => {
             return cachedResponse;
           }
           if (e.request.mode === 'navigate') {
-            return caches.match('/index.html');
+            return caches.match('index.html');
           }
         });
       })

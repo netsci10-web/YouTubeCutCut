@@ -2,7 +2,7 @@
   "name": "YouTube CutCut",
   "short_name": "CutCut",
   "description": "유튜브 구간 반복 학습기 - 정교한 루프 컨트롤, 단축키 지원, 북마크 관리",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#020617",

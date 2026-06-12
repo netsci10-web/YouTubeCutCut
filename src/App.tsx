@@ -451,6 +451,18 @@ export default function App() {
           return; // 메인 타이머 폴러는 중지하고 팝업 메세지를 수신 대기함
         }
 
+        // Sync volume levels bidirectionally in real-time
+        if (typeof playerRef.current.getVolume === "function") {
+          let currentVol = playerRef.current.getVolume();
+          if (typeof playerRef.current.isMuted === "function" && playerRef.current.isMuted()) {
+            currentVol = 0;
+          }
+          if (typeof currentVol === "number" && currentVol !== playerVolume) {
+            setPlayerVolume(currentVol);
+            localStorage.setItem("yt_loop_player_volume", currentVol.toString());
+          }
+        }
+
         // Grab precise timestamp directly from Youtube player Iframe API
         const time = playerRef.current.getCurrentTime();
         if (typeof time === "number" && !isNaN(time)) {
@@ -469,7 +481,7 @@ export default function App() {
     return () => {
       if (loopIntervalRef.current) clearInterval(loopIntervalRef.current);
     };
-  }, [startTime, endTime, loopActive, isRangeEnabled, isCooldownActive, cooldownDelay, countdownIntro, popoutActive]);
+  }, [startTime, endTime, loopActive, isRangeEnabled, isCooldownActive, cooldownDelay, countdownIntro, popoutActive, playerVolume]);
 
   // Web Audio synth chime to guide intervals nicely
   const playCountdownSynthTone = (freq: number, dur: number) => {
@@ -1409,11 +1421,6 @@ export default function App() {
               {/* Range A Set Deck - Now Sound & Playback Speed */}
               <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between">
                 <div>
-                  <div className="text-[11px] font-bold text-slate-400 px-0.5 flex items-center gap-1.5 mb-2.5 border-b border-slate-850 pb-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                    소리 및 재생 배속 설정
-                  </div>
-
                   {/* 소리 크기 (볼륨) 슬라이더 */}
                   <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-2.5 mt-2.5 space-y-2">
                     <div 
@@ -1537,11 +1544,6 @@ export default function App() {
               {/* Range B Set Deck - Now Range Activation & repeat loop delay */}
               <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between">
                 <div>
-                  <div className="text-[11px] font-bold text-slate-400 px-0.5 flex items-center gap-1.5 mb-2.5 border-b border-slate-850 pb-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                    구간 기능 및 반복 제어
-                  </div>
-
                   {/* 구간 기능 켜기/끄기 토글 버튼 */}
                   <div className="mt-2 select-none">
                     <button

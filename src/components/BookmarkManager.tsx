@@ -229,22 +229,22 @@ export function BookmarkManager({
               onSubmit={handleCreateBookmark}
               className="bg-slate-900 border border-slate-800 rounded-2xl p-4.5 space-y-4 animate-in slide-in-from-top-4 duration-200"
             >
-              <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                <h4 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+              <div className="pb-2.5 border-b border-slate-800/80 space-y-2">
+                <h4 className="text-sm font-bold text-slate-200 flex items-center gap-1.5 font-display">
                   <Plus className="w-4 h-4 text-emerald-400" />
-                  새로운 반복 학습 구간 추가
+                  현재 구간을 플레이리스트에 추가
                 </h4>
-                <span className="text-[10px] text-indigo-300 bg-slate-950 font-mono py-0.5 px-2.5 rounded-full border border-slate-800">
-                  구간 범위: {formatTime(currentA)} ~ {formatTime(currentB)}
-                </span>
+                <div className="text-[11px] text-indigo-300 font-mono inline-block bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-850">
+                  구간 범위: <span className="font-bold text-emerald-400">{formatTime(currentA)} ~ {formatTime(currentB)}</span>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">구간 이름 *</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">구간 설명 및 메모 *</label>
                   <input
                     type="text"
-                    placeholder="예: 1절 하이라이트 후렴구, 어려운 영어 발음"
+                    placeholder="예: 후렴구 하이라이트 구간 또는 3초 f 발음 따라 하기"
                     value={bmTitle}
                     onChange={(e) => setBmTitle(e.target.value)}
                     required
@@ -252,19 +252,6 @@ export function BookmarkManager({
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">태그 (쉼표로 구분)</label>
-                  <input
-                    type="text"
-                    placeholder="예: 발음연습, 영어, 구간후렴"
-                    value={bmTags}
-                    onChange={(e) => setBmTags(e.target.value)}
-                    className="w-full bg-slate-950 text-slate-100 border border-slate-800 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-1">구간별 권장 배속</label>
                   <select
@@ -279,17 +266,6 @@ export function BookmarkManager({
                     ))}
                   </select>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">메모 및 설명</label>
-                  <input
-                    type="text"
-                    placeholder="해당 반복 구간의 키포인트 기록"
-                    value={bmNotes}
-                    onChange={(e) => setBmNotes(e.target.value)}
-                    className="w-full bg-slate-950 text-slate-100 border border-slate-800 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-1">
@@ -302,7 +278,7 @@ export function BookmarkManager({
                 </button>
                 <button
                   type="submit"
-                  className="bg-indigo-500 hover:bg-indigo-400 text-slate-100 font-bold px-4 py-1.5 rounded-xl text-xs transition-colors shadow-md"
+                  className="bg-indigo-505 hover:bg-indigo-405 text-white font-bold px-4 py-1.5 rounded-xl text-xs transition-colors shadow-md cursor-pointer"
                 >
                   추가 완료
                 </button>
@@ -314,7 +290,14 @@ export function BookmarkManager({
           <div className="flex items-center justify-between border-b border-slate-900 pb-3 gap-2 flex-wrap">
             <button
               onClick={() => {
-                setShowAddBookmark(!showAddBookmark);
+                const nextVal = !showAddBookmark;
+                setShowAddBookmark(nextVal);
+                if (nextVal) {
+                  setBmTitle(currentVideoTitle || "새로운 학습 구간");
+                  setBmNotes("");
+                  setBmTags("");
+                  setBmSpeed(currentSpeed);
+                }
               }}
               type="button"
               className="px-3.5 py-1.8 bg-indigo-650 hover:bg-indigo-550 active:scale-95 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1 shadow-md shadow-indigo-950/20 cursor-pointer"
@@ -382,7 +365,7 @@ export function BookmarkManager({
                 }`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${isSequentialPlayActive ? "bg-emerald-400 animate-pulse" : "bg-indigo-400"}`} />
-                <span>{isSequentialPlayActive ? "순차 자동 실행 중" : "순차 기능 꺼짐"}</span>
+                <span>{isSequentialPlayActive ? "순차 자동 실행 중" : "순차 재생"}</span>
               </button>
 
               {/* Next Button */}
@@ -398,9 +381,9 @@ export function BookmarkManager({
           </div>
 
           {/* 5. Bookmarks flat list with front title and rear 2x2 actions */}
-          <div className="space-y-2.5 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-850">
+          <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-850">
             {bookmarks.length === 0 ? (
-              <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-7 text-center text-slate-400 text-xs">
+              <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-6 text-center text-slate-400 text-xs">
                 ✨ 플레이리스트에 저장된 구간이 없습니다. 
                 <br />
                 영상을 재생한 뒤 위 버튼을 눌러 소중한 학습 구간을 기록하세요.
@@ -409,14 +392,14 @@ export function BookmarkManager({
               bookmarks.map((bm) => (
                 <div
                   key={bm.id}
-                  className={`group relative bg-slate-900/95 border hover:border-slate-700/80 rounded-2xl p-3 transition-all flex items-center justify-between gap-3 ${
+                  className={`group relative bg-slate-900/95 border hover:border-slate-700/80 rounded-xl py-1 px-2.5 transition-all flex items-center justify-between gap-2.5 ${
                     activeBookmarkId === bm.id
                       ? "border-indigo-500/80 shadow-md shadow-indigo-950/20 bg-indigo-950/15"
                       : "border-slate-800/85"
                   }`}
                 >
                   {/* Left Section: Checkbox + Reorder arrows + Title and notes */}
-                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
                     {/* Checkbox */}
                     <input
                       type="checkbox"
@@ -448,7 +431,7 @@ export function BookmarkManager({
                     {/* Title & metadata info */}
                     <div className="min-w-0 flex-1">
                       {editingBmId === bm.id ? (
-                        <div className="space-y-1.5 py-1">
+                        <div className="space-y-1 py-1">
                           <input
                             type="text"
                             value={editTitle}
@@ -489,27 +472,40 @@ export function BookmarkManager({
                         </div>
                       ) : (
                         <div className="space-y-1">
-                          <div className="font-semibold text-slate-200 text-xs truncate leading-normal flex items-center gap-1">
+                          <div className="font-semibold text-slate-100 text-xs truncate leading-normal flex items-center gap-1">
                             {activeBookmarkId === bm.id && (
                               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse inline-block" />
                             )}
-                            <span title={bm.title}>{bm.title}</span>
+                            <span title={bm.title} className="text-slate-200 font-bold">{bm.title}</span>
                           </div>
-                          <div className="flex flex-wrap items-center gap-1 font-mono text-[9.5px]">
-                            <span className="text-emerald-450 font-bold">
-                              {formatTime(bm.startTime)} ~ {formatTime(bm.endTime)}
+                          
+                          {/* Time & Speed metadata indicators */}
+                          <div className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
+                            <span className="text-emerald-400 font-bold bg-emerald-500/10 px-1 py-0.2 rounded border border-emerald-500/10">
+                              ⏱️ {formatTime(bm.startTime)} ~ {formatTime(bm.endTime)}
                             </span>
                             {bm.speed !== 1 && (
-                              <span className="text-indigo-405 bg-indigo-500/10 px-1 rounded">
+                              <span className="text-indigo-300 bg-indigo-500/15 px-1 py-0.2 rounded border border-indigo-500/10 font-bold">
                                 {bm.speed.toFixed(2)}x
                               </span>
                             )}
-                            {bm.notes && (
-                              <span className="text-slate-400 truncate max-w-[124px] ml-0.5" title={bm.notes}>
-                                ({bm.notes})
-                              </span>
-                            )}
                           </div>
+
+                          {/* Stored YouTube Title and contents details */}
+                          {bm.videoTitle && (
+                            <div className="text-[9.5px] text-slate-400 truncate max-w-[170px] sm:max-w-[240px]" title={bm.videoTitle}>
+                              📺 {bm.videoTitle}
+                            </div>
+                          )}
+
+                          {/* Custom separate explanations block (hiding "빠른 추가 구간" completely as requested) */}
+                          {bm.notes && bm.notes !== "빠른 추가 구간" && (
+                            <div className="bg-indigo-950/10 border border-indigo-900/20 rounded-lg p-1 mt-0.5 select-text">
+                              <p className="text-[10px] text-slate-350 leading-relaxed font-sans font-medium break-words whitespace-pre-wrap">
+                                {bm.notes}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
