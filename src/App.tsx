@@ -159,11 +159,39 @@ export default function App() {
     setIsSearching(true);
     setSearchError(null);
     try {
-      const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(query)}`);
-      if (!response.ok) {
-        throw new Error("유튜브 검색 결과가 존재하지 않거나 일시적 오류입니다.");
+      let data;
+      try {
+        const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(query)}`);
+        if (!response.ok) {
+          throw new Error("Local backend search failed");
+        }
+        data = await response.json();
+      } catch (backendErr) {
+        // Static file server fallback: fetch directly from YouTube API on the client side
+        const fallbackApiKey = "AIzaSyA3dXC8mF32ItPvd5wUDBt-uUWZvonvY5Q";
+        const fallbackUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&maxResults=10&key=${fallbackApiKey}`;
+        const directResponse = await fetch(fallbackUrl);
+        if (!directResponse.ok) {
+          throw new Error("유튜브 검색 API 호출에 실패했습니다 (서버 미작동 및 API 할당량 제한 등).");
+        }
+        const ytData = await directResponse.json();
+        const items = (ytData.items || []).map((item: any) => {
+          const titleRaw = item.snippet?.title || "Unknown Title";
+          const title = titleRaw
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>');
+          return {
+            id: item.id?.videoId || "",
+            title: title,
+            channelTitle: item.snippet?.channelTitle || "YouTube Channel",
+            thumbnail: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url || "",
+          };
+        }).filter((item: any) => item.id !== "");
+        data = { items };
       }
-      const data = await response.json();
       setSearchResults(data.items || []);
     } catch (err: any) {
       setSearchError(err.message || "유튜브 검색 중 오류가 발생했습니다.");
@@ -304,9 +332,49 @@ export default function App() {
     const fetchMeta = async () => {
       setVideoMeta(prev => ({ ...prev, loading: true, error: "" }));
       try {
-        const res = await fetch(`/api/youtube-meta?videoId=${encodeURIComponent(activeVideoId)}`);
-        if (!res.ok) throw new Error("Metadata API resolution failed");
-        const data = await res.json();
+        let data;
+        try {
+          const res = await fetch(`/api/youtube-meta?videoId=${encodeURIComponent(activeVideoId)}`);
+          if (!res.ok) throw new Error("Metadata API resolution failed");
+          data = await res.json();
+        } catch (backendErr) {
+          // Static file server fallback: fetch directly from YouTube API on the client side (e.g. GitHub Pages)
+          const fallbackApiKey = "AIzaSyA3dXC8mF32ItPvd5wUDBt-uUWZvonvY5Q";
+          const fallbackUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${encodeURIComponent(activeVideoId)}&key=${fallbackApiKey}`;
+          const directRes = await fetch(fallbackUrl);
+          if (!directRes.ok) throw new Error("Direct YouTube API load failed");
+          
+          const ytData = await directRes.json();
+          if (ytData.items && ytData.items.length > 0) {
+            const item = ytData.items[0];
+            const title = item.snippet?.title || "Unknown Title";
+            const channelTitle = item.snippet?.channelTitle || "Unknown Channel";
+            const imgObj = item.snippet?.thumbnails?.high || item.snippet?.thumbnails?.medium || item.snippet?.thumbnails?.default;
+            const thumbnail = imgObj?.url || `https://img.youtube.com/vi/${activeVideoId}/hqdefault.jpg`;
+            const durationStr = item.contentDetails?.duration || "";
+            
+            // Parse ISO 8601 duration
+            const durationRegex = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/;
+            const matches = durationStr.match(durationRegex);
+            let durationSeconds = 0;
+            if (matches) {
+              const hours = parseInt(matches[1] || "0", 10);
+              const minutes = parseInt(matches[2] || "0", 10);
+              const seconds = parseInt(matches[3] || "0", 10);
+              durationSeconds = hours * 3600 + minutes * 60 + seconds;
+            }
+            durationSeconds = durationSeconds || 300;
+            
+            data = {
+              title,
+              channelTitle,
+              thumbnail,
+              duration: durationSeconds
+            };
+          } else {
+            throw new Error("No video item found in response");
+          }
+        }
         
         setVideoMeta({
           videoId: activeVideoId,
@@ -333,8 +401,7 @@ export default function App() {
           setIsEndSet(false);
         }
       } catch (err: any) {
-        console.warn("Could not fetch video meta securely:", err.message);
-        // Fallback gracefully using live iframe metrics later
+        console.warn("Could not fetch video meta securely, using client values:", err.message);
         setVideoMeta({
           videoId: activeVideoId,
           title: "YouTube Video Resource",
