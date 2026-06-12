@@ -1,0 +1,8 @@
+{
+  "name": "YouTube CutCut",
+  "description": "Repetitive learning YouTube player with precise loop control, custom hotkeys, bookmarks list, playback speed adjustments, and audio waveform visualization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
