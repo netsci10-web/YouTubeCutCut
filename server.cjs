@@ -221,6 +221,58 @@ async function startServer() {
       return res.status(500).json({ error: error.message, items: [] });
     }
   });
+  app.get("/api/youtube-subtitles", async (req, res) => {
+    const videoId = req.query.videoId;
+    if (!videoId) {
+      return res.status(400).json({ error: "videoId is required", subtitles: [] });
+    }
+    try {
+      let captions = [];
+      try {
+        captions = await (0, import_youtube_captions_scraper.getSubtitles)({
+          videoID: videoId,
+          lang: "ko"
+        });
+      } catch (koErr) {
+        console.log(`Failed ko subtitles for ${videoId}, trying default/en...`);
+        try {
+          captions = await (0, import_youtube_captions_scraper.getSubtitles)({
+            videoID: videoId,
+            lang: "en"
+          });
+        } catch (enErr) {
+          console.log(`Failed both ko/en subtitles for ${videoId}`);
+        }
+      }
+      if (captions && captions.length > 0) {
+        const list = captions.map((c) => ({
+          start: parseFloat(c.start) || 0,
+          text: c.text ? c.text.trim() : ""
+        }));
+        return res.json({ subtitles: list, videoId });
+      } else {
+        return res.json({
+          subtitles: [
+            { start: 0, text: "\uC548\uB155\uD558\uC138\uC694! \uD574\uB2F9 \uC601\uC0C1\uC740 \uC720\uD29C\uBE0C \uACF5\uC2DD \uB300\uC678 \uC790\uB9C9 \uC11C\uBE44\uC2A4\uAC00 \uBE44\uD65C\uC131\uD654\uB41C \uC0DD\uD0DC\uC785\uB2C8\uB2E4 \u{1F507}" },
+            { start: 10, text: "\uD558\uC9C0\uB9CC \uC624\uB978\uCABD \uC544\uB798 [\uCD94\uCC9C \uB9AC\uC2A4\uD2B8]\uC5D0\uC11C \uB2E4\uB978 \uC601\uC5B4 \uD68C\uD654 \uAC15\uC88C\uB098 \uCF54\uB529 \uC601\uC0C1\uC744 \uACE0\uB974\uC2DC\uBA74 \uC2E4\uC81C \uC720\uD29C\uBE0C\uC5D0\uC11C \uC790\uB9C9\uC744 \uC2E4\uC2DC\uAC04\uC73C\uB85C \uBB34\uD55C \uCD94\uCD9C\uD569\uB2C8\uB2E4 \u{1F31F}" },
+            { start: 30, text: "\uAD6C\uAC04\uBC18\uBCF5 \uD559\uC2B5 \uB3C4\uC911\uC5D0 \uC6D0\uD558\uB294 \uC790\uB9C9 \uBB38\uC7A5\uC744 \uC120\uD0DD\uD558\uC5EC \uC790\uB9C9 GOTO\uB97C \uB20C\uB7EC\uC8FC\uC2DC\uBA74 \uADF8 \uC989\uC2DC \uD574\uB2F9 \uC2DC\uAC04\uC73C\uB85C \uC774\uB3D9\uD569\uB2C8\uB2E4." },
+            { start: 60, text: "\uADF8 \uBC16\uC5D0 \uC0C1\uB2E8 \uAC80\uC0C9 \uCF58\uC194\uC774\uB098 \uC8FC\uC18C \uC785\uB825\uC744 \uD65C\uC6A9\uD574 \uB2E4\uB978 \uACE0\uD488\uC9C8\uC758 \uC601\uC0C1 \uD559\uC2B5\uC744 \uC2DC\uB3C4\uD574 \uBCF4\uC138\uC694!" }
+          ],
+          videoId,
+          isNoSubtitleFallback: true
+        });
+      }
+    } catch (e) {
+      console.warn("Subtitles error, sending fallback list:", e.message);
+      return res.json({
+        subtitles: [
+          { start: 0, text: "[\uC548\uB0B4] \uC774 \uC601\uC0C1\uC5D0\uB294 \uC790\uB3D9 \uCD94\uCD9C\uC774 \uC9C0\uC5F0\uB418\uAC70\uB098 \uC81C\uACF5\uB418\uC9C0 \uC54A\uB294 \uC790\uB9C9 \uAD6C\uC870\uC785\uB2C8\uB2E4." }
+        ],
+        videoId,
+        isNoSubtitleFallback: true
+      });
+    }
+  });
   async function fetchTranscript(videoId) {
     if (!videoId) return "";
     try {
