@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { Bookmark, Folder } from "../types";
 import { 
-  Plus, Trash2, Play, 
-  Download, Upload, Tag, FileText, ChevronRight, Edit3,
+  Plus, Trash2, Play, Pause,
+  Download, Upload, Tag, FileText, ChevronRight, ChevronLeft, Edit3,
   ChevronUp, ChevronDown, Loader
 } from "lucide-react";
 
@@ -77,6 +77,10 @@ export function BookmarkManager({
   const [editingBmId, setEditingBmId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [editStartTime, setEditStartTime] = useState<number>(0);
+  const [editEndTime, setEditEndTime] = useState<number>(0);
+  const [editSpeed, setEditSpeed] = useState<number>(1.0);
+  const [editVolume, setEditVolume] = useState<number>(100);
 
   // Helper formats
   const formatTime = (sec: number) => {
@@ -105,7 +109,7 @@ export function BookmarkManager({
       startTime: currentA,
       endTime: currentB,
       speed: bmSpeed,
-      notes: bmNotes.trim(),
+      notes: "",
       tags: tagList,
       folderId: "",
       volume: currentVolume,
@@ -234,30 +238,30 @@ export function BookmarkManager({
                   <Plus className="w-4 h-4 text-emerald-400" />
                   현재 구간을 플레이리스트에 추가
                 </h4>
-                <div className="text-[11px] text-indigo-300 font-mono inline-block bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-850">
+                <div className="text-[11px] text-indigo-300 font-mono inline-block bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-850 font-medium">
                   구간 범위: <span className="font-bold text-emerald-400">{formatTime(currentA)} ~ {formatTime(currentB)}</span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              <div className="space-y-3.5">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">구간 설명 및 메모 *</label>
+                  <label className="block text-xs font-semibold text-slate-450 mb-1">구간 설명 및 메모 *</label>
                   <input
                     type="text"
                     placeholder="예: 후렴구 하이라이트 구간 또는 3초 f 발음 따라 하기"
                     value={bmTitle}
                     onChange={(e) => setBmTitle(e.target.value)}
                     required
-                    className="w-full bg-slate-950 text-slate-100 border border-slate-800 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-slate-950 text-slate-100 border border-slate-800 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-550"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">구간별 권장 배속</label>
+                  <label className="block text-xs font-semibold text-slate-455 mb-1">구간별 권장 배속 설정</label>
                   <select
                     value={bmSpeed}
                     onChange={(e) => setBmSpeed(parseFloat(e.target.value))}
-                    className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-2.5 py-2 text-xs focus:outline-none"
+                    className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-2.5 py-2 text-xs focus:outline-none focus:border-indigo-550"
                   >
                     {[0.25, 0.5, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0].map((s) => (
                       <option key={s} value={s}>
@@ -300,10 +304,10 @@ export function BookmarkManager({
                 }
               }}
               type="button"
-              className="px-3.5 py-1.8 bg-indigo-650 hover:bg-indigo-550 active:scale-95 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1 shadow-md shadow-indigo-950/20 cursor-pointer"
+              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-md shadow-emerald-950/40 cursor-pointer border border-emerald-500/35"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>현재 구간을 플레이리스트에 추가</span>
+              <span>구간추가</span>
             </button>
 
             <div className="flex items-center gap-1.5 shrink-0">
@@ -332,53 +336,76 @@ export function BookmarkManager({
           </div>
 
           {/* Sequential Playback Media Control Bar */}
-          <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-3 mb-3 space-y-3 shadow-md">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full inline-block ${isSequentialPlayActive ? "bg-indigo-400 animate-pulse" : "bg-slate-600"}`} />
-                <span>체크된 구간 순차 자동 재생 제어</span>
-              </span>
-              <span className="text-[9.5px] text-slate-500 font-mono">
-                {bookmarks.filter(b => b.checked !== false).length}개 구간 선택됨
-              </span>
-            </div>
+          {(() => {
+            const checkedBMs = bookmarks.filter((bm) => bm.checked !== false);
+            const currentIndex = checkedBMs.findIndex((bm) => bm.id === activeBookmarkId);
+            const prevDisabled = checkedBMs.length === 0 || currentIndex === 0;
+            const nextDisabled = checkedBMs.length === 0 || (currentIndex !== -1 && currentIndex === checkedBMs.length - 1);
 
-            <div className="flex items-center gap-2">
-              {/* Prev Button */}
-              <button
-                onClick={onPlayPrev}
-                type="button"
-                className="flex-1 h-9 bg-slate-950 hover:bg-slate-850 rounded-xl border border-slate-800 text-slate-300 hover:text-white transition-colors text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
-                title="이전 체크 구간으로 이동"
-              >
-                ◀ 이전 구간
-              </button>
+            return (
+              <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-3 mb-3 space-y-3 shadow-md">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full inline-block ${isSequentialPlayActive ? "bg-indigo-400 animate-pulse" : "bg-slate-600"}`} />
+                    <span>체크된 구간 순차 자동 재생 제어</span>
+                  </span>
+                  <span className="text-[9.5px] text-slate-500 font-mono">
+                    {checkedBMs.length}개 구간 선택됨
+                  </span>
+                </div>
 
-              {/* Play/Stop Sequential Sequence Button */}
-              <button
-                onClick={onToggleSequentialPlay}
-                type="button"
-                className={`flex-[1.5] h-9 rounded-xl border font-bold transition-all text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
-                  isSequentialPlayActive
-                    ? "bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-450 shadow-md shadow-indigo-900/35"
-                    : "bg-slate-950 text-indigo-400 hover:bg-slate-900 border-slate-850"
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${isSequentialPlayActive ? "bg-emerald-400 animate-pulse" : "bg-indigo-400"}`} />
-                <span>{isSequentialPlayActive ? "순차 자동 실행 중" : "순차 재생"}</span>
-              </button>
+                <div className="flex items-center gap-2">
+                  {/* Prev Button */}
+                  <button
+                    onClick={onPlayPrev}
+                    disabled={prevDisabled}
+                    type="button"
+                    className={`flex-1 h-9 rounded-xl border text-slate-300 hover:text-white transition-all text-xs font-bold flex items-center justify-center cursor-pointer ${
+                      prevDisabled
+                        ? "opacity-30 bg-slate-900 border-slate-850 text-slate-600 cursor-not-allowed"
+                        : "bg-slate-950 hover:bg-slate-850 border-slate-800 active:scale-95"
+                    }`}
+                    title={prevDisabled ? "첫 번째 구간입니다" : "이전 체크 구간으로 이동"}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
 
-              {/* Next Button */}
-              <button
-                onClick={onPlayNext}
-                type="button"
-                className="flex-1 h-9 bg-slate-950 hover:bg-slate-850 rounded-xl border border-slate-800 text-slate-300 hover:text-white transition-colors text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
-                title="다음 체크 구간으로 이동"
-              >
-                다음 구간 ▶
-              </button>
-            </div>
-          </div>
+                  {/* Play/Stop Sequential Sequence Button */}
+                  <button
+                    onClick={onToggleSequentialPlay}
+                    type="button"
+                    className={`flex-[1.5] h-9 rounded-xl border font-bold transition-all text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${
+                      isSequentialPlayActive
+                        ? "bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-455 shadow-md shadow-indigo-900/35"
+                        : "bg-slate-950 text-indigo-400 hover:bg-slate-900 border-slate-850"
+                    }`}
+                    title={isSequentialPlayActive ? "순차 자동 재생 끄기" : "순차 자동 재생 켜기"}
+                  >
+                    {isSequentialPlayActive ? (
+                      <Pause className="w-3.5 h-3.5" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                    )}
+                  </button>
+
+                  {/* Next Button */}
+                  <button
+                    onClick={onPlayNext}
+                    disabled={nextDisabled}
+                    type="button"
+                    className={`flex-1 h-9 rounded-xl border text-slate-300 hover:text-white transition-all text-xs font-bold flex items-center justify-center cursor-pointer ${
+                      nextDisabled
+                        ? "opacity-30 bg-slate-900 border-slate-850 text-slate-600 cursor-not-allowed"
+                        : "bg-slate-950 hover:bg-slate-850 border-slate-805 active:scale-95"
+                    }`}
+                    title={nextDisabled ? "마지막 구간입니다" : "다음 체크 구간으로 이동"}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* 5. Bookmarks flat list with front title and rear 2x2 actions */}
           <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-850">
@@ -389,200 +416,301 @@ export function BookmarkManager({
                 영상을 재생한 뒤 위 버튼을 눌러 소중한 학습 구간을 기록하세요.
               </div>
             ) : (
-              bookmarks.map((bm) => (
-                <div
-                  key={bm.id}
-                  className={`group relative bg-slate-900/95 border hover:border-slate-700/80 rounded-xl py-1 px-2.5 transition-all flex items-center justify-between gap-2.5 ${
-                    activeBookmarkId === bm.id
-                      ? "border-indigo-500/80 shadow-md shadow-indigo-950/20 bg-indigo-950/15"
-                      : "border-slate-800/85"
-                  }`}
-                >
-                  {/* Left Section: Checkbox + Reorder arrows + Title and notes */}
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {/* Checkbox */}
-                    <input
-                      type="checkbox"
-                      checked={bm.checked !== false}
-                      onChange={() => onToggleBookmarkChecked?.(bm.id)}
-                      className="w-4 h-4 rounded text-indigo-550 accent-indigo-550 border-slate-700 bg-slate-950 focus:ring-indigo-550 shrink-0 cursor-pointer"
-                    />
+              bookmarks.map((bm) => {
+                const isEditing = editingBmId === bm.id;
+                return (
+                  <div
+                    key={bm.id}
+                    className={`group relative bg-slate-900/95 border hover:border-slate-700/80 rounded-xl py-1 px-2.5 transition-all flex items-center justify-between gap-2.5 ${
+                      activeBookmarkId === bm.id
+                        ? "border-indigo-500/80 shadow-md shadow-indigo-950/20 bg-indigo-950/15"
+                        : "border-slate-800/85"
+                    }`}
+                  >
+                    {isEditing ? (
+                      <div className="w-full py-1.5 space-y-2">
+                        <div className="space-y-1.5 bg-slate-900 border border-slate-850 p-2.5 rounded-lg">
+                          <div>
+                            <label className="block text-[10px] text-slate-400 font-bold mb-0.5">구간 설명 및 메모 (제목) *</label>
+                            <input
+                              type="text"
+                              value={editTitle}
+                              onChange={(e) => setEditTitle(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1 text-xs text-slate-100 focus:outline-none focus:border-indigo-550"
+                              placeholder="구간 이름을 입력하세요"
+                              autoFocus
+                            />
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[9px] text-slate-400 font-bold mb-0.5">시작 지점 (A) - 초단위</label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.1"
+                                value={editStartTime}
+                                onChange={(e) => setEditStartTime(parseFloat(e.target.value) || 0)}
+                                className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2 py-0.5 text-xs text-emerald-400 font-mono text-center"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] text-slate-400 font-bold mb-0.5">종료 지점 (B) - 초단위</label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.1"
+                                value={editEndTime}
+                                onChange={(e) => setEditEndTime(parseFloat(e.target.value) || 0)}
+                                className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2 py-0.5 text-xs text-rose-450 font-mono text-center"
+                              />
+                            </div>
+                          </div>
 
-                    {/* Reorder Buttons (Up / Down) */}
-                    <div className="flex flex-col gap-0.5 shrink-0">
-                      <button
-                        onClick={() => onMoveBookmarkUp?.(bm.id)}
-                        type="button"
-                        className="p-0.5 text-slate-500 hover:text-indigo-400 hover:bg-slate-850 rounded transition-colors"
-                        title="위로 이동"
-                      >
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => onMoveBookmarkDown?.(bm.id)}
-                        type="button"
-                        className="p-0.5 text-slate-500 hover:text-indigo-400 hover:bg-slate-850 rounded transition-colors"
-                        title="아래로 이동"
-                      >
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                          {/* 현재 플레이어의 실시간 조절된 구간 받아오기 버튼 */}
+                          <div className="flex flex-col gap-1.5 bg-slate-950/60 border border-slate-850/40 p-2 rounded-lg mt-1">
+                            <span className="text-[9.5px] text-slate-400 font-medium">
+                              현재 세팅 구간: <strong className="text-emerald-400 font-mono">{formatTime(currentA)} ~ {formatTime(currentB)}</strong>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditStartTime(Number(currentA.toFixed(2)));
+                                setEditEndTime(Number(currentB.toFixed(2)));
+                              }}
+                              className="w-full py-1.5 bg-slate-900 hover:bg-slate-850 border border-indigo-500/20 hover:border-indigo-500/50 text-indigo-400 hover:text-indigo-300 text-[10px] font-bold rounded-md cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1"
+                              title="현재 유튜브 학습 동영상 플레이어에서 조절한 구간 시간값을 양식에 대입합니다"
+                            >
+                              🔄 현재 동영상의 구간 적용하기
+                            </button>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[9px] text-slate-400 font-bold mb-0.5">권장 재생 속도</label>
+                              <select
+                                value={editSpeed}
+                                onChange={(e) => setEditSpeed(parseFloat(e.target.value))}
+                                className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-550"
+                              >
+                                {[0.25, 0.5, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0].map((s) => (
+                                  <option key={s} value={s}>
+                                    {s === 1.0 ? "기본 배속 (1.0x)" : `${s.toFixed(2)}x`}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
 
-                    {/* Title & metadata info */}
-                    <div className="min-w-0 flex-1">
-                      {editingBmId === bm.id ? (
-                        <div className="space-y-1 py-1">
-                          <input
-                            type="text"
-                            value={editTitle}
-                            onChange={(e) => setEditTitle(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1 text-xs text-slate-100 focus:outline-none focus:border-indigo-550"
-                            placeholder="구간 이름을 입력하세요"
-                            autoFocus
-                          />
-                          <input
-                            type="text"
-                            value={editNotes}
-                            onChange={(e) => setEditNotes(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1 text-xs text-slate-100 focus:outline-none focus:border-indigo-550"
-                            placeholder="메모를 입력하세요 (선택)"
-                          />
+                            <div>
+                              <label className="block text-[9px] text-slate-400 font-bold mb-0.5">권장 소리 크기 (%)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={editVolume}
+                                onChange={(e) => setEditVolume(Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0)))}
+                                className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2 py-1 text-xs text-indigo-400 font-mono text-center focus:outline-none focus:border-indigo-550"
+                              />
+                            </div>
+                          </div>
+                          
                           <div className="flex gap-1.5 justify-end">
                             <button
                               onClick={() => setEditingBmId(null)}
-                              className="px-2 py-0.5 text-[10px] bg-slate-800 text-slate-350 rounded-md"
+                              className="px-2 py-0.5 text-[10px] bg-slate-800 text-slate-350 rounded-md font-bold cursor-pointer"
+                              type="button"
                             >
                               취소
                             </button>
                             <button
                               onClick={() => {
+                                if (editStartTime > editEndTime) {
+                                  alert("시작 지점이 종료 지점보다 뒤에 있을 수 없습니다!");
+                                  return;
+                                }
                                 if (onUpdateBookmark && editTitle.trim()) {
                                   onUpdateBookmark(bm.id, {
                                     title: editTitle.trim(),
-                                    notes: editNotes.trim()
+                                    notes: "",
+                                    startTime: Number(editStartTime.toFixed(2)),
+                                    endTime: Number(editEndTime.toFixed(2)),
+                                    speed: editSpeed,
+                                    volume: editVolume,
                                   });
                                 }
                                 setEditingBmId(null);
                               }}
-                              className="px-2 py-0.5 text-[10px] bg-indigo-650 text-white font-bold rounded-md"
+                              className="px-2 py-0.5 text-[10px] bg-indigo-650 hover:bg-indigo-550 text-white font-bold rounded-md cursor-pointer"
+                              type="button"
                             >
                               저장
                             </button>
                           </div>
                         </div>
-                      ) : (
-                        <div className="space-y-1">
-                          <div className="font-semibold text-slate-100 text-xs truncate leading-normal flex items-center gap-1">
-                            {activeBookmarkId === bm.id && (
-                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse inline-block" />
-                            )}
-                            <span title={bm.title} className="text-slate-200 font-bold">{bm.title}</span>
-                          </div>
-                          
-                          {/* Time & Speed metadata indicators */}
-                          <div className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
-                            <span className="text-emerald-400 font-bold bg-emerald-500/10 px-1 py-0.2 rounded border border-emerald-500/10">
-                              ⏱️ {formatTime(bm.startTime)} ~ {formatTime(bm.endTime)}
-                            </span>
-                            {bm.speed !== 1 && (
-                              <span className="text-indigo-300 bg-indigo-500/15 px-1 py-0.2 rounded border border-indigo-500/10 font-bold">
-                                {bm.speed.toFixed(2)}x
-                              </span>
-                            )}
+                      </div>
+                    ) : (
+                      <>
+                        {/* Left Section: Checkbox + Reorder arrows + Title and notes */}
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {/* Checkbox */}
+                          <input
+                            type="checkbox"
+                            checked={bm.checked !== false}
+                            onChange={() => onToggleBookmarkChecked?.(bm.id)}
+                            className="w-4 h-4 rounded text-indigo-550 accent-indigo-550 border-slate-700 bg-slate-950 focus:ring-indigo-550 shrink-0 cursor-pointer"
+                          />
+
+                          {/* Reorder Buttons (Up / Down) */}
+                          <div className="flex flex-col gap-0.5 shrink-0">
+                            <button
+                              onClick={() => onMoveBookmarkUp?.(bm.id)}
+                              type="button"
+                              className="p-0.5 text-slate-500 hover:text-indigo-400 hover:bg-slate-850 rounded transition-colors"
+                              title="위로 이동"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => onMoveBookmarkDown?.(bm.id)}
+                              type="button"
+                              className="p-0.5 text-slate-500 hover:text-indigo-400 hover:bg-slate-850 rounded transition-colors"
+                              title="아래로 이동"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
                           </div>
 
-                          {/* Stored YouTube Title and contents details */}
-                          {bm.videoTitle && (
-                            <div className="text-[9.5px] text-slate-400 truncate max-w-[170px] sm:max-w-[240px]" title={bm.videoTitle}>
-                              📺 {bm.videoTitle}
-                            </div>
-                          )}
+                          {/* Title & metadata info */}
+                          <div className="min-w-0 flex-1">
+                            <div className="space-y-1">
+                              <div className="font-semibold text-slate-100 text-xs truncate leading-normal flex items-center gap-1">
+                                {activeBookmarkId === bm.id && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse inline-block" />
+                                )}
+                                <span title={bm.title} className="text-slate-200 font-bold">{bm.title}</span>
+                              </div>
+                              
+                              {/* Time & Speed metadata indicators */}
+                              <div className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
+                                <span className="text-emerald-400 font-bold bg-emerald-500/10 px-1 py-0.2 rounded border border-emerald-500/10">
+                                  ⏱️ {formatTime(bm.startTime)} ~ {formatTime(bm.endTime)}
+                                </span>
+                                {bm.speed !== 1 && (
+                                  <span className="text-indigo-300 bg-indigo-500/15 px-1 py-0.2 rounded border border-indigo-500/10 font-bold">
+                                    {bm.speed.toFixed(2)}x
+                                  </span>
+                                )}
+                                {bm.volume !== undefined && bm.volume !== 100 && (
+                                  <span className="text-amber-400 bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/10 font-bold">
+                                    🔊 {bm.volume}%
+                                  </span>
+                                )}
+                              </div>
 
-                          {/* Custom separate explanations block (hiding "빠른 추가 구간" completely as requested) */}
-                          {bm.notes && bm.notes !== "빠른 추가 구간" && (
-                            <div className="bg-indigo-950/10 border border-indigo-900/20 rounded-lg p-1 mt-0.5 select-text">
-                              <p className="text-[10px] text-slate-350 leading-relaxed font-sans font-medium break-words whitespace-pre-wrap">
-                                {bm.notes}
-                              </p>
+                              {/* Stored YouTube Title and contents details */}
+                              {bm.videoTitle && (
+                                <div className="text-[9.5px] text-slate-400 truncate max-w-[170px] sm:max-w-[240px]" title={bm.videoTitle}>
+                                  📺 {bm.videoTitle}
+                                </div>
+                              )}
+
+                              {bm.notes && bm.notes !== "빠른 추가 구간" && (
+                                <div className="bg-indigo-950/10 border border-indigo-900/20 rounded-lg p-1 mt-0.5 select-text">
+                                  <p className="text-[10px] text-slate-350 leading-relaxed font-sans font-medium break-words whitespace-pre-wrap">
+                                    {bm.notes}
+                                  </p>
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
                         </div>
-                      )}
-                    </div>
+
+                        {/* Right Section: 2x2 control panel matching user specifications */}
+                        <div className="grid grid-cols-2 gap-1 shrink-0 w-[60px]">
+                          {/* Top-Left: 즉시로드 */}
+                          <button
+                            onClick={() => onSelectBookmark(bm, false)}
+                            type="button"
+                            className="w-7 h-7 bg-slate-800 border border-slate-700/80 hover:bg-slate-700 hover:text-slate-100 rounded-lg text-slate-300 flex items-center justify-center transition-all cursor-pointer shadow-sm"
+                            title="구간 즉시로드"
+                          >
+                            <Loader className="w-3.5 h-3.5 text-slate-450 shrink-0" />
+                          </button>
+
+                          {/* Top-Right: 자동플레이 */}
+                          <button
+                            onClick={() => onSelectBookmark(bm, true)}
+                            type="button"
+                            className="w-7 h-7 bg-indigo-600 border border-indigo-550 hover:bg-indigo-500 hover:border-white rounded-lg text-white flex items-center justify-center transition-all cursor-pointer shadow-md shadow-indigo-950/20"
+                            title="자동 플레이"
+                          >
+                            <Play className="w-3 h-3 fill-current text-white shrink-0" />
+                          </button>
+
+                          {/* Bottom-Left: 수정 */}
+                          <button
+                            onClick={() => {
+                              if (editingBmId === bm.id) {
+                                setEditingBmId(null);
+                              } else {
+                                setEditingBmId(bm.id);
+                                setEditTitle(bm.title);
+                                setEditNotes(bm.notes || "");
+                                if (activeBookmarkId === bm.id) {
+                                  setEditStartTime(Number(currentA.toFixed(2)));
+                                  setEditEndTime(Number(currentB.toFixed(2)));
+                                  setEditSpeed(currentSpeed);
+                                  setEditVolume(currentVolume !== undefined ? currentVolume : (bm.volume || 100));
+                                } else {
+                                  setEditStartTime(bm.startTime);
+                                  setEditEndTime(bm.endTime);
+                                  setEditSpeed(bm.speed || 1.0);
+                                  setEditVolume(bm.volume || 100);
+                                }
+                              }
+                            }}
+                            type="button"
+                            className={`w-7 h-7 border rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                              editingBmId === bm.id
+                                ? "bg-amber-500 text-slate-950 border-amber-400"
+                                : "bg-slate-950 border-slate-850 hover:bg-slate-900 hover:border-slate-800 text-slate-450 hover:text-slate-200"
+                            }`}
+                            title="구간 정보 수정"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 shrink-0" />
+                          </button>
+
+                          {/* Bottom-Right: 삭제 */}
+                          <button
+                            onClick={() => {
+                              if (deletingBookmarkId === bm.id) {
+                                onDeleteBookmark(bm.id);
+                                setDeletingBookmarkId(null);
+                              } else {
+                                setDeletingBookmarkId(bm.id);
+                                setTimeout(() => setDeletingBookmarkId((prev) => (prev === bm.id ? null : prev)), 3000);
+                              }
+                            }}
+                            type="button"
+                            className={`w-7 h-7 border rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                              deletingBookmarkId === bm.id
+                                ? "bg-rose-500 text-white border-rose-400 animate-pulse animate-bounce"
+                                : "bg-slate-950 border-slate-800 hover:bg-slate-900 hover:border-slate-800 text-slate-550 hover:text-rose-400"
+                            }`}
+                            title={deletingBookmarkId === bm.id ? "클릭 시 즉시 삭제 (확인)" : "구간 삭제"}
+                          >
+                            {deletingBookmarkId === bm.id ? (
+                              <Trash2 className="w-3.5 h-3.5 shrink-0 text-white" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5 shrink-0 text-slate-500" />
+                            )}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
-
-                  {/* Right Section: 2x2 control panel matching user specifications */}
-                  <div className="grid grid-cols-2 gap-1 shrink-0 w-[60px]">
-                    {/* Top-Left: 즉시로드 */}
-                    <button
-                      onClick={() => onSelectBookmark(bm, false)}
-                      type="button"
-                      className="w-7 h-7 bg-slate-800 border border-slate-700/80 hover:bg-slate-700 hover:text-slate-100 rounded-lg text-slate-300 flex items-center justify-center transition-all cursor-pointer shadow-sm"
-                      title="구간 즉시로드"
-                    >
-                      <Loader className="w-3.5 h-3.5 text-slate-450 shrink-0" />
-                    </button>
-
-                    {/* Top-Right: 자동플레이 */}
-                    <button
-                      onClick={() => onSelectBookmark(bm, true)}
-                      type="button"
-                      className="w-7 h-7 bg-indigo-600 border border-indigo-550 hover:bg-indigo-500 hover:border-white rounded-lg text-white flex items-center justify-center transition-all cursor-pointer shadow-md shadow-indigo-950/20"
-                      title="자동 플레이"
-                    >
-                      <Play className="w-3 h-3 fill-current text-white shrink-0" />
-                    </button>
-
-                    {/* Bottom-Left: 수정 */}
-                    <button
-                      onClick={() => {
-                        if (editingBmId === bm.id) {
-                          setEditingBmId(null);
-                        } else {
-                          setEditingBmId(bm.id);
-                          setEditTitle(bm.title);
-                          setEditNotes(bm.notes || "");
-                        }
-                      }}
-                      type="button"
-                      className={`w-7 h-7 border rounded-lg flex items-center justify-center transition-all cursor-pointer ${
-                        editingBmId === bm.id
-                          ? "bg-amber-500 text-slate-950 border-amber-400"
-                          : "bg-slate-950 border-slate-850 hover:bg-slate-900 hover:border-slate-800 text-slate-450 hover:text-slate-200"
-                      }`}
-                      title="구간 정보 수정"
-                    >
-                      <Edit3 className="w-3.5 h-3.5 shrink-0" />
-                    </button>
-
-                    {/* Bottom-Right: 삭제 */}
-                    <button
-                      onClick={() => {
-                        if (deletingBookmarkId === bm.id) {
-                          onDeleteBookmark(bm.id);
-                          setDeletingBookmarkId(null);
-                        } else {
-                          setDeletingBookmarkId(bm.id);
-                          setTimeout(() => setDeletingBookmarkId((prev) => (prev === bm.id ? null : prev)), 3000);
-                        }
-                      }}
-                      type="button"
-                      className={`w-7 h-7 border rounded-lg flex items-center justify-center transition-all cursor-pointer ${
-                        deletingBookmarkId === bm.id
-                          ? "bg-rose-500 text-white border-rose-400 animate-pulse animate-bounce"
-                          : "bg-slate-950 border-slate-800 hover:bg-slate-900 hover:border-slate-800 text-slate-550 hover:text-rose-400"
-                      }`}
-                      title={deletingBookmarkId === bm.id ? "클릭 시 즉시 삭제 (확인)" : "구간 삭제"}
-                    >
-                      {deletingBookmarkId === bm.id ? (
-                        <Trash2 className="w-3.5 h-3.5 shrink-0 text-white" />
-                      ) : (
-                        <Trash2 className="w-3.5 h-3.5 shrink-0 text-slate-500" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 

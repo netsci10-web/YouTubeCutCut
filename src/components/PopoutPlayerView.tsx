@@ -9,6 +9,8 @@ interface SyncStateData {
   playbackSpeed: number;
   isPlaying: boolean;
   currentTime: number;
+  playerVolume?: number;
+  isMuted?: boolean;
 }
 
 export function PopoutPlayerView() {
@@ -53,23 +55,43 @@ export function PopoutPlayerView() {
 
       if (action === "sync_state") {
         const state: SyncStateData = e.data;
-        if (state.videoId && state.videoId !== videoId) {
-          setVideoId(state.videoId);
-        }
+        
+        // Determine whether a completely different video is loaded
+        const isVideoChanging = state.videoId && state.videoId !== videoId;
+
         setStartTime(state.startTime);
         setEndTime(state.endTime);
         setLoopActive(state.loopActive);
         setPlaybackSpeed(state.playbackSpeed);
         
-        // Sync player playback rate
-        if (playerRef.current && iframeReadyRef.current) {
-          playerRef.current.setPlaybackRate(state.playbackSpeed);
-          
-          // Pause/Play sync
-          if (state.isPlaying && playerRef.current.getPlayerState() !== 1) {
-            playerRef.current.playVideo();
-          } else if (!state.isPlaying && playerRef.current.getPlayerState() === 1) {
-            playerRef.current.pauseVideo();
+        if (isVideoChanging) {
+          setVideoId(state.videoId);
+          // Let the [videoId] useEffect load/cue the new video dynamically
+        } else {
+          // If it's the exact same video, just sync player states without destroying it
+          if (playerRef.current && iframeReadyRef.current) {
+            playerRef.current.setPlaybackRate(state.playbackSpeed);
+            
+            if (state.playerVolume !== undefined && typeof playerRef.current.setVolume === "function") {
+              playerRef.current.setVolume(state.playerVolume);
+            }
+            if (state.isMuted !== undefined && typeof playerRef.current.unMute === "function") {
+              if (state.isMuted) {
+                playerRef.current.mute();
+              } else {
+                playerRef.current.unMute();
+              }
+            }
+
+            // Pause/Play sync
+            try {
+              const currentState = playerRef.current.getPlayerState();
+              if (state.isPlaying && currentState !== 1) {
+                playerRef.current.playVideo();
+              } else if (!state.isPlaying && currentState === 1) {
+                playerRef.current.pauseVideo();
+              }
+            } catch (pErr) {}
           }
         }
       } else if (action === "seek") {
@@ -98,18 +120,20 @@ export function PopoutPlayerView() {
           setConnectionStatus("스토리지 동기화 중 🟢");
 
           if (action === "sync_state") {
-            if (data.videoId && data.videoId !== videoId) {
-              setVideoId(data.videoId);
-            }
+            const isVideoChanging = data.videoId && data.videoId !== videoId;
             setStartTime(data.startTime);
             setEndTime(data.endTime);
             setLoopActive(data.loopActive);
             setPlaybackSpeed(data.playbackSpeed);
             
-            if (playerRef.current && iframeReadyRef.current) {
-              playerRef.current.setPlaybackRate(data.playbackSpeed);
-              if (data.isPlaying) playerRef.current.playVideo();
-              else playerRef.current.pauseVideo();
+            if (isVideoChanging) {
+              setVideoId(data.videoId);
+            } else {
+              if (playerRef.current && iframeReadyRef.current) {
+                playerRef.current.setPlaybackRate(data.playbackSpeed);
+                if (data.isPlaying) playerRef.current.playVideo();
+                else playerRef.current.pauseVideo();
+              }
             }
           } else if (action === "seek") {
             if (playerRef.current && iframeReadyRef.current) {
@@ -142,13 +166,41 @@ export function PopoutPlayerView() {
   useEffect(() => {
     if (!videoId) return;
 
-    // Destroy existing player if any
+    // VERY IMPORTANT: If player already exists and is ready, load/cue the new video dynamically
+    // rather than tearing down and rebuilding the whole iframe components!
+    if (playerRef.current && iframeReadyRef.current) {
+      try {
+        if (typeof playerRef.current.loadVideoById === "function") {
+          // If parent is playing, load and play immediately. Otherwise cue.
+          if (isPlaying) {
+            playerRef.current.loadVideoById({
+              videoId: videoId,
+              startSeconds: startTime
+            });
+          } else {
+            playerRef.current.cueVideoById({
+              videoId: videoId,
+              startSeconds: startTime
+            });
+          }
+          if (typeof playerRef.current.setPlaybackRate === "function") {
+            playerRef.current.setPlaybackRate(playbackSpeed);
+          }
+          return; // Skip destroying and rebuilding iframe layout!
+        }
+      } catch (err) {
+        console.warn("Failed dynamic loading, falling back to clean recreation:", err);
+      }
+    }
+
+    // Otherwise, clean initialize the player
     if (playerRef.current) {
       try {
         playerRef.current.destroy();
       } catch (e) {}
       playerRef.current = null;
     }
+    iframeReadyRef.current = false;
 
     // Initialize player
     const initPlayer = () => {
@@ -184,8 +236,8 @@ export function PopoutPlayerView() {
                   if (typeof event.target.seekTo === "function") {
                     event.target.seekTo(startTime, true);
                   }
-                  if (typeof event.target.unmute === "function") {
-                    event.target.unmute();
+                  if (typeof event.target.unMute === "function") {
+                    event.target.unMute();
                   }
                 }
               } catch (e) {}
@@ -241,12 +293,21 @@ export function PopoutPlayerView() {
           }
         }
       } catch (err) {}
-    }, 150);
+    }, 60);
 
     return () => {
       if (loopIntervalRef.current) clearInterval(loopIntervalRef.current);
     };
   }, [startTime, endTime, loopActive]);
+
+  // Robustly force playback rate sync inside the popout player instance on speed updates
+  useEffect(() => {
+    if (playerRef.current && iframeReadyRef.current && typeof playerRef.current.setPlaybackRate === "function") {
+      try {
+        playerRef.current.setPlaybackRate(playbackSpeed);
+      } catch (e) {}
+    }
+  }, [playbackSpeed]);
 
   // Request fullscreen toggle on the container element
   const toggleFullscreen = () => {

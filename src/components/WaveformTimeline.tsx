@@ -11,6 +11,7 @@ interface WaveformTimelineProps {
   videoId: string;
   isStartSet?: boolean;
   isEndSet?: boolean;
+  isRangeEnabled?: boolean;
 }
 
 export function WaveformTimeline({
@@ -24,6 +25,7 @@ export function WaveformTimeline({
   videoId,
   isStartSet = true,
   isEndSet = true,
+  isRangeEnabled = true,
 }: WaveformTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragTarget, setDragTarget] = useState<"start" | "end" | "seek" | null>(null);
@@ -148,98 +150,102 @@ export function WaveformTimeline({
   return (
     <div className="w-full select-none mt-2">
       {/* Visual coordinates metadata */}
-      <div className="flex justify-between items-center text-xs text-slate-400 font-mono mb-2 px-1 gap-4 flex-wrap sm:flex-nowrap">
+      <div className={`flex items-center text-xs text-slate-400 font-mono mb-2 px-1 gap-4 flex-wrap sm:flex-nowrap ${isRangeEnabled ? "justify-between" : "justify-center"}`}>
         {/* 시작지점 (A)와 미세조정 */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onChangeStart(Math.max(0, Math.min(currentTime, endTime - 0.2)));
-            }}
-            type="button"
-            title="현재 재생 위치를 시작지점(A)으로 지정 [단축키: Q]"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-emerald-500/10 active:scale-95 border border-slate-800 hover:border-emerald-500/30 text-slate-300 transition-all cursor-pointer font-sans h-9"
-          >
-            <span className={`w-2 h-2 rounded-full ring-2 ring-emerald-950 inline-block ${isStartSet ? "bg-emerald-500" : "bg-slate-600 animate-pulse"}`}></span>
-            <span className="text-slate-300 font-semibold text-xs text-[11px]">시작지점 (A):</span>
-            <strong className={`font-mono text-xs ${isStartSet ? "text-emerald-400" : "text-slate-550"} text-[11px]`}>
-              {isStartSet ? formatTime(startTime) : "지정하기"}
-            </strong>
-          </button>
-          
-          <div className="flex items-center gap-1">
+        {isRangeEnabled && (
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onChangeStart(Math.max(0, startTime - 1));
+                onChangeStart(Math.max(0, Math.min(currentTime, endTime - 0.2)));
               }}
               type="button"
-              className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
-              title="시작 시점 1초 앞으로 당기기"
+              title="현재 재생 위치를 시작지점(A)으로 지정 [단축키: Q]"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-905 hover:bg-emerald-500/10 active:scale-95 border border-slate-800 hover:border-emerald-500/30 text-slate-300 transition-all cursor-pointer font-sans h-9"
             >
-              -1s
+              <span className={`w-2 h-2 rounded-full ring-2 ring-emerald-950 inline-block ${isStartSet ? "bg-emerald-500" : "bg-slate-600 animate-pulse"}`}></span>
+              <span className="text-slate-300 font-semibold text-xs text-[11px]">시작지점 (A):</span>
+              <strong className={`font-mono text-xs ${isStartSet ? "text-emerald-400" : "text-slate-550"} text-[11px]`}>
+                {isStartSet ? formatTime(startTime) : "지정하기"}
+              </strong>
             </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onChangeStart(Math.min(endTime - 0.2, startTime + 1));
-              }}
-              type="button"
-              className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
-              title="시작 시점 1초 뒤로 미루기"
-            >
-              +1s
-            </button>
+            
+            <div className="flex items-center gap-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChangeStart(Math.max(0, startTime - 1));
+                }}
+                type="button"
+                className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
+                title="시작 시점 1초 앞으로 당기기"
+              >
+                -1s
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChangeStart(Math.min(endTime - 0.2, startTime + 1));
+                }}
+                type="button"
+                className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
+                title="시작 시점 1초 뒤로 미루기"
+              >
+                +1s
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         <span className="text-slate-400 font-sans text-xs bg-slate-950/40 border border-slate-900 px-3 py-1.5 rounded-xl h-9 flex items-center shrink-0">
           현재: <strong className="text-sky-300 font-mono font-bold ml-1">{formatTime(currentTime)}</strong>
         </span>
 
         {/* 종료지점 (B)와 미세조정 */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <div className="flex items-center gap-1">
+        {isRangeEnabled && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChangeEnd(Math.max(startTime + 0.2, endTime - 1));
+                }}
+                type="button"
+                className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
+                title="종료 시점 1초 앞으로 당기기"
+              >
+                -1s
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChangeEnd(Math.min(duration, endTime + 1));
+                }}
+                type="button"
+                className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
+                title="종료 시점 1초 뒤로 미루기"
+              >
+                +1s
+              </button>
+            </div>
+
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onChangeEnd(Math.max(startTime + 0.2, endTime - 1));
+                onChangeEnd(Math.max(startTime + 0.2, Math.min(currentTime, duration)));
               }}
               type="button"
-              className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
-              title="종료 시점 1초 앞으로 당기기"
+              title="현재 재생 위치를 종료지점(B)으로 지정 [단축키: W]"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-905 hover:bg-rose-500/10 active:scale-95 border border-slate-800 hover:border-rose-500/30 text-slate-300 transition-all cursor-pointer font-sans h-9"
             >
-              -1s
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onChangeEnd(Math.min(duration, endTime + 1));
-              }}
-              type="button"
-              className="px-2 py-1.5 text-[10.5px] font-bold bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-300 font-mono h-9 transition-colors flex items-center justify-center cursor-pointer select-none"
-              title="종료 시점 1초 뒤로 미루기"
-            >
-              +1s
+              <span className="text-slate-300 font-semibold text-xs text-[11px]">종료지점 (B):</span>
+              <strong className={`font-mono text-xs ${isEndSet ? "text-rose-400" : "text-slate-550"} text-[11px]`}>
+                {isEndSet ? formatTime(endTime) : "지정하기"}
+              </strong>
+              <span className={`w-2 h-2 rounded-full ring-2 ring-rose-950 inline-block ${isEndSet ? "bg-rose-500" : "bg-slate-600 animate-pulse"}`}></span>
             </button>
           </div>
-
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onChangeEnd(Math.max(startTime + 0.2, Math.min(currentTime, duration)));
-            }}
-            type="button"
-            title="현재 재생 위치를 종료지점(B)으로 지정 [단축키: W]"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-rose-500/10 active:scale-95 border border-slate-800 hover:border-rose-500/30 text-slate-300 transition-all cursor-pointer font-sans h-9"
-          >
-            <span className="text-slate-300 font-semibold text-xs text-[11px]">종료지점 (B):</span>
-            <strong className={`font-mono text-xs ${isEndSet ? "text-rose-400" : "text-slate-550"} text-[11px]`}>
-              {isEndSet ? formatTime(endTime) : "지정하기"}
-            </strong>
-            <span className={`w-2 h-2 rounded-full ring-2 ring-rose-950 inline-block ${isEndSet ? "bg-rose-500" : "bg-slate-600 animate-pulse"}`}></span>
-          </button>
-        </div>
+        )}
       </div>
 
       <div
@@ -249,7 +255,7 @@ export function WaveformTimeline({
         id="waveform-area"
       >
         {/* Shaded loop region background */}
-        {isStartSet && isEndSet && (
+        {isRangeEnabled && isStartSet && isEndSet && (
           <div
             className="absolute h-full bg-slate-800/40 border-x border-slate-700/50"
             style={{
@@ -260,13 +266,13 @@ export function WaveformTimeline({
         )}
 
         {/* Shaded non-loop inactive regions */}
-        {isStartSet && (
+        {isRangeEnabled && isStartSet && (
           <div
             className="absolute h-full left-0 top-0 bg-slate-950/60"
             style={{ width: `${startPct}%` }}
           />
         )}
-        {isEndSet && (
+        {isRangeEnabled && isEndSet && (
           <div
             className="absolute h-full right-0 top-0 bg-slate-950/60"
             style={{ left: `${endPct}%` }}
@@ -279,7 +285,7 @@ export function WaveformTimeline({
             const barPct = (idx / waves.length) * 100;
             const effectiveStartPct = isStartSet ? startPct : 0;
             const effectiveEndPct = isEndSet ? endPct : 100;
-            const isInsideSelection = barPct >= effectiveStartPct && barPct <= effectiveEndPct;
+            const isInsideSelection = !isRangeEnabled || (barPct >= effectiveStartPct && barPct <= effectiveEndPct);
             const isPassedPlayhead = barPct <= currentPct;
 
             let barColor = "bg-slate-700 opacity-40";
@@ -311,7 +317,7 @@ export function WaveformTimeline({
         </div>
 
         {/* Draggable Handle A Line & Ribbon */}
-        {isStartSet && (
+        {isStartSet && isRangeEnabled && (
           <div
             className="absolute top-0 bottom-0 w-[2px] bg-emerald-500 cursor-ew-resize group"
             style={{ left: `${startPct}%` }}
@@ -324,7 +330,7 @@ export function WaveformTimeline({
         )}
 
         {/* Draggable Handle B Line & Ribbon */}
-        {isEndSet && (
+        {isEndSet && isRangeEnabled && (
           <div
             className="absolute top-0 bottom-0 w-[2px] bg-rose-500 cursor-ew-resize group"
             style={{ left: `${endPct}%` }}
@@ -340,9 +346,13 @@ export function WaveformTimeline({
       {/* Helpful duration coordinates helper footer */}
       <div className="flex justify-between text-[11px] text-slate-500 font-mono mt-1 px-1">
         <span>00:00.0</span>
-        <span className="text-amber-500 font-medium">
-          선택 구간 간격: {isStartSet && isEndSet ? formatTime(endTime - startTime) : "미지정"}
-        </span>
+        {isRangeEnabled ? (
+          <span className="text-amber-500 font-medium">
+            선택 구간 간격: {isStartSet && isEndSet ? formatTime(endTime - startTime) : "미지정"}
+          </span>
+        ) : (
+          <span className="text-slate-600/80 italic font-sans text-[10px]">구간 재생 꺼짐</span>
+        )}
         <span>{formatTime(duration)}</span>
       </div>
     </div>

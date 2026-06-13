@@ -5,8 +5,8 @@ import { HotkeySettings } from "./components/HotkeySettings";
 import { BookmarkManager } from "./components/BookmarkManager";
 import { 
   Play, Pause, Square, RotateCw, SkipBack, SkipForward, Flame, Keyboard, Info, Check, AlertCircle,
-  HelpCircle, Sparkles, Sliders, Volume2, Globe, Music, GraduationCap, Monitor, Search, Loader2,
-  Plus, Download, Upload
+  HelpCircle, Sparkles, Sliders, Volume2, VolumeX, Globe, Music, GraduationCap, Monitor, Search, Loader2,
+  Plus, Download, Upload, Repeat, Brain, Cpu, Eye, Languages
 } from "lucide-react";
 
 // Standard YouTube URL extractor
@@ -112,6 +112,14 @@ export default function App() {
     const saved = localStorage.getItem("yt_loop_player_volume");
     return saved ? parseInt(saved, 10) : 100;
   });
+  const [isMuted, setIsMuted] = useState<boolean>(() => {
+    const saved = localStorage.getItem("yt_loop_player_is_muted");
+    return saved === "true";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("yt_loop_player_is_muted", String(isMuted));
+  }, [isMuted]);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -131,8 +139,11 @@ export default function App() {
   const loopIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const cooldownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const feedbackTimeoutRef = useRef<number | null>(null);
+  const lastVolumeActionTimeRef = useRef<number>(0);
+  const lastVideoLoadedTimeRef = useRef<number>(0);
   const skipInitialResetRef = useRef<boolean>(false);
-  const loadedFromBookmarkRef = useRef<{ startTime: number; endTime: number } | null>(null);
+  const loadedFromBookmarkRef = useRef<{ startTime: number; endTime: number; volume?: number } | null>(null);
+  const isInitializingRef = useRef<boolean>(false);
   const autoPlayIntentRef = useRef<boolean>(false);
 
   // --- Popout Mode Management for Second Monitor Fullscreen ---
@@ -141,6 +152,105 @@ export default function App() {
   const [playerSize, setPlayerSize] = useState<number>(100); // Main video player size percent (50% to 100%)
   const [isPlayerReady, setIsPlayerReady] = useState(false);
 
+  // --- YouTube Iframe Player API Dynamic States ---
+  const [apiPlayerState, setApiPlayerState] = useState<number>(-1);
+  const [apiAvailableQualities, setApiAvailableQualities] = useState<string[]>([]);
+  const [apiCurrentQuality, setApiCurrentQuality] = useState<string>("");
+  const [apiAvailableRates, setApiAvailableRates] = useState<number[]>([]);
+  const [apiLoadedFraction, setApiLoadedFraction] = useState<number>(0);
+  const [apiVideoData, setApiVideoData] = useState<{ title: string; author: string; video_id: string } | null>(null);
+  const [apiCaptionsEnabled, setApiCaptionsEnabled] = useState<boolean>(false);
+  const [apiVolume, setApiVolume] = useState<number>(100);
+  const [apiIsMuted, setApiIsMuted] = useState<boolean>(false);
+
+  const updateIframeApiStates = () => {
+    if (!playerRef.current || !iframeReadyRef.current) return;
+    try {
+      if (typeof playerRef.current.getPlayerState === "function") {
+        setApiPlayerState(playerRef.current.getPlayerState());
+      }
+      if (typeof playerRef.current.getAvailableQualityLevels === "function") {
+        const qualities = playerRef.current.getAvailableQualityLevels();
+        if (Array.isArray(qualities)) {
+          setApiAvailableQualities(qualities);
+        }
+      }
+      if (typeof playerRef.current.getPlaybackQuality === "function") {
+        setApiCurrentQuality(playerRef.current.getPlaybackQuality());
+      }
+      if (typeof playerRef.current.getAvailablePlaybackRates === "function") {
+        const rates = playerRef.current.getAvailablePlaybackRates();
+        if (Array.isArray(rates)) {
+          setApiAvailableRates([...rates].sort((a: number, b: number) => a - b));
+        }
+      }
+      if (typeof playerRef.current.getVideoLoadedFraction === "function") {
+        setApiLoadedFraction(playerRef.current.getVideoLoadedFraction());
+      }
+      if (typeof playerRef.current.getVideoData === "function") {
+        const data = playerRef.current.getVideoData();
+        if (data && typeof data === "object") {
+          setApiVideoData({
+            title: data.title || "",
+            author: data.author || "",
+            video_id: data.video_id || "",
+          });
+        }
+      }
+      if (typeof playerRef.current.getVolume === "function") {
+        setApiVolume(playerRef.current.getVolume());
+      }
+      if (typeof playerRef.current.isMuted === "function") {
+        setApiIsMuted(playerRef.current.isMuted());
+      }
+    } catch (e) {
+      // Ignore transient errors
+    }
+  };
+
+  // --- AI Smart Extraction States ---
+  const [aiAnalysisCache, setAiAnalysisCache] = useState<Record<string, { topic: string; sentences: any[]; scenes: any[]; isRealAi: boolean; note?: string }>>({});
+  const [isAnalyzingVideo, setIsAnalyzingVideo] = useState(false);
+  const [analysisTab, setAnalysisTab] = useState<"speech" | "vision">("speech");
+
+  const handleAnalyzeVideo = async () => {
+    if (!activeVideoId) {
+      showTemporaryNotification("먼저 분석할 유튜브 영상을 로드해 주세요 📺");
+      return;
+    }
+    
+    setIsAnalyzingVideo(true);
+    showTemporaryNotification("AI 스마트 구간 분석을 시작합니다... ✨");
+
+    try {
+      const response = await fetch("/api/gemini/analyze-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoId: activeVideoId,
+          videoTitle: videoMeta.title,
+          duration: videoMeta.duration,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("서버 통신 실패");
+      }
+
+      const data = await response.json();
+      setAiAnalysisCache((prev) => ({
+        ...prev,
+        [activeVideoId]: data,
+      }));
+      showTemporaryNotification("AI 스마트 구간 분석이 완료되었습니다 🚀");
+    } catch (e: any) {
+      console.error("AI Analysis error:", e);
+      showTemporaryNotification("분석 과정에서 오류가 발생했습니다 ⚠️");
+    } finally {
+      setIsAnalyzingVideo(false);
+    }
+  };
+
   // --- YouTube Search States ---
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -148,6 +258,14 @@ export default function App() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchCollapsed, setSearchCollapsed] = useState<boolean>(() => {
     const saved = localStorage.getItem("yt_loop_search_collapsed");
+    return saved === "true";
+  });
+  const [aiCardCollapsed, setAiCardCollapsed] = useState<boolean>(() => {
+    const saved = localStorage.getItem("yt_loop_ai_card_collapsed");
+    return saved === "true";
+  });
+  const [apiCardCollapsed, setApiCardCollapsed] = useState<boolean>(() => {
+    const saved = localStorage.getItem("yt_loop_api_card_collapsed");
     return saved === "true";
   });
 
@@ -214,6 +332,13 @@ export default function App() {
           }
           if (typeof e.data.isPlaying === "boolean") {
             setIsPlaying(e.data.isPlaying);
+          }
+          
+          // Secure lockdown to make absolutely sure the main video behind does not play sound
+          if (playerRef.current && iframeReadyRef.current) {
+            try {
+              playerRef.current.mute();
+            } catch (err) {}
           }
         }
       } else if (action === "popout_closed") {
@@ -304,9 +429,62 @@ export default function App() {
       loopActive,
       playbackSpeed,
       isPlaying,
-      currentTime
+      currentTime,
+      playerVolume,
+      isMuted
     });
-  }, [activeVideoId, startTime, endTime, loopActive, playbackSpeed, isPlaying]);
+  }, [activeVideoId, startTime, endTime, loopActive, playbackSpeed, isPlaying, playerVolume, isMuted]);
+
+  // Prevent main player from producing overlapping audio when popout is active.
+  // It locks the main player to a completely muted state during dual-monitor presentation to let the user scrub on the main screen,
+  // and properly restores the sound and mute preferences when the popout player is turned off.
+  useEffect(() => {
+    if (!playerRef.current || !iframeReadyRef.current) return;
+    try {
+      if (popoutActive) {
+        playerRef.current.mute();
+      } else {
+        if (isMuted) {
+          playerRef.current.mute();
+        } else {
+          playerRef.current.unMute();
+          playerRef.current.setVolume(playerVolume);
+        }
+      }
+    } catch (e) {}
+  }, [popoutActive, isMuted, playerVolume, activeVideoId]);
+
+  // 브라우저의 Autoplay 보안 정책을 시원하게 조율할 수 있는 최초 스크린 터치/클릭 해제 리스너 등록
+  useEffect(() => {
+    const handleFirstUserInteraction = () => {
+      if (playerRef.current && iframeReadyRef.current) {
+        try {
+          const savedVol = localStorage.getItem("yt_loop_player_volume");
+          const vol = savedVol ? parseInt(savedVol, 10) : playerVolume;
+          const savedMuted = localStorage.getItem("yt_loop_player_is_muted") === "true";
+          
+          if (!savedMuted && !popoutActive) {
+            playerRef.current.unMute();
+            playerRef.current.setVolume(vol);
+            setIsMuted(false);
+          } else if (savedMuted) {
+            playerRef.current.mute();
+            setIsMuted(true);
+          }
+        } catch (e) {}
+      }
+      // 단 1회 실행 후 자체 폐기
+      window.removeEventListener("click", handleFirstUserInteraction);
+      window.removeEventListener("touchstart", handleFirstUserInteraction);
+    };
+
+    window.addEventListener("click", handleFirstUserInteraction);
+    window.addEventListener("touchstart", handleFirstUserInteraction);
+    return () => {
+      window.removeEventListener("click", handleFirstUserInteraction);
+      window.removeEventListener("touchstart", handleFirstUserInteraction);
+    };
+  }, [popoutActive, playerVolume]);
 
   // Sync to localStorage
   useEffect(() => {
@@ -441,38 +619,92 @@ export default function App() {
       if (!playerRef.current || isCooldownActive) return;
 
       try {
+        // 팝업 전송(듀얼 모니터 송출) 상태일 때는 소리 중첩(하울링)을 막기 위해 메인 비디오를 강제로 음소거 상태로 봉쇄합니다.
         if (popoutActive) {
-          // 팝업 활성화 시 메인 비디오는 절대 작동하지 않고 pause 강제 유지
           try {
-            if (typeof playerRef.current.getPlayerState === "function" && playerRef.current.getPlayerState() === 1) {
-              playerRef.current.pauseVideo();
+            if (typeof playerRef.current.mute === "function") {
+              playerRef.current.mute();
             }
           } catch (e) {}
-          return; // 메인 타이머 폴러는 중지하고 팝업 메세지를 수신 대기함
         }
 
-        // Sync volume levels bidirectionally in real-time
-        if (typeof playerRef.current.getVolume === "function") {
-          let currentVol = playerRef.current.getVolume();
-          if (typeof playerRef.current.isMuted === "function" && playerRef.current.isMuted()) {
-            currentVol = 0;
+        // 볼륨 역방향 실동기화: 비디오가 정상 재생 중일 때, 사용자가 유튜브 플레이어 자체 화면 조종계로 구동한 볼륨 및 음소거 변경 수치를 완벽히 상호 동기화(연동)시킵니다.
+        // 단, 최근에 사용자가 직접 앱에서 볼륨 조정이나 음소거 전환을 한 경우 일정 시간 동기화를 우회해 레이스 컨디션을 방지합니다.
+        // 추가로, 초기 구성 중(isInitializingRef)이거나 비디오 로드 후 극초반 대기 기간(5초) 동안은 동기화를 우회하여 자동재생 등의 부작용으로 발생한 무조건 전송 muted 상태가 사용자 본래 설정을 덮어쓰지 않도록 원천 봉쇄합니다.
+        try {
+          if (!popoutActive) {
+            const isRecentlyPrepared = isInitializingRef.current || (Date.now() - lastVideoLoadedTimeRef.current < 5000);
+            if (!isRecentlyPrepared && Date.now() - lastVolumeActionTimeRef.current > 2000 && typeof playerRef.current.getPlayerState === "function" && playerRef.current.getPlayerState() === 1) {
+              const ytIsMuted = typeof playerRef.current.isMuted === "function" ? playerRef.current.isMuted() : false;
+              // 음소거 상태 상호 동기화
+              if (ytIsMuted !== isMuted) {
+                setIsMuted(ytIsMuted);
+              }
+              if (!ytIsMuted && typeof playerRef.current.getVolume === "function") {
+                const ytVol = playerRef.current.getVolume();
+                // 브라우저 자동 재생 제재 등으로 일시적 0% 볼륨인 경우를 제외하고 유효한 볼륨 변경을 연동
+                if (typeof ytVol === "number" && ytVol > 0 && ytVol !== playerVolume) {
+                  setPlayerVolume(ytVol);
+                  localStorage.setItem("yt_loop_player_volume", ytVol.toString());
+                }
+              }
+            }
           }
-          if (typeof currentVol === "number" && currentVol !== playerVolume) {
-            setPlayerVolume(currentVol);
-            localStorage.setItem("yt_loop_player_volume", currentVol.toString());
-          }
-        }
+        } catch (volSyncErr) {}
 
         // Grab precise timestamp directly from Youtube player Iframe API
         const time = playerRef.current.getCurrentTime();
         if (typeof time === "number" && !isNaN(time)) {
+          // 메인 화면속 유튜브 전용 플레이타임 조절바 드래그 등을 감지하여 보조 팝업 영상의 재생 위치(Timehead)도 즉각 미러링시킵니다.
+          if (popoutActive && Math.abs(time - currentTime) > 0.5) {
+            syncPopoutWithParent("seek", { currentTime: time });
+          }
+
           setCurrentTime(time);
 
           // Loop repeat check bounding (only if range function is enabled)
-          if (isRangeEnabled && loopActive && isEndSet && time >= endTime) {
-            handleRepeatReset();
+          if (isRangeEnabled && isEndSet && time >= endTime) {
+            if (loopActive) {
+              handleRepeatReset();
+            } else {
+              try {
+                const playerState = typeof playerRef.current.getPlayerState === "function" 
+                  ? playerRef.current.getPlayerState() 
+                  : null;
+                if (playerState === 1) { // PLAYING
+                  playerRef.current.pauseVideo();
+                  playerRef.current.seekTo(endTime, true);
+                  setIsPlaying(false);
+                  showTemporaryNotification("구간 끝 지점에 도달하여 일시정지 상태로 대기합니다 ⏹️");
+                }
+              } catch (e) {}
+            }
           }
         }
+
+        // 메인 플레이어에서의 재생 상태(Play/Pause) 변경을 주기적으로 감지하여 보조 윈도우 영상과 미러링을 완료합니다.
+        if (typeof playerRef.current.getPlayerState === "function") {
+          const ytState = playerRef.current.getPlayerState();
+          const ytIsPlaying = (ytState === 1); // 1 = PLAYING
+          if (ytIsPlaying !== isPlaying) {
+            setIsPlaying(ytIsPlaying);
+            if (popoutActive) {
+              syncPopoutWithParent("sync_state", {
+                videoId: activeVideoId,
+                startTime,
+                endTime,
+                loopActive,
+                playbackSpeed,
+                isPlaying: ytIsPlaying,
+                currentTime: time,
+                playerVolume,
+                isMuted
+              });
+            }
+          }
+        }
+
+        updateIframeApiStates();
       } catch (err) {
         // Player state is unavailable/initializing
       }
@@ -481,7 +713,7 @@ export default function App() {
     return () => {
       if (loopIntervalRef.current) clearInterval(loopIntervalRef.current);
     };
-  }, [startTime, endTime, loopActive, isRangeEnabled, isCooldownActive, cooldownDelay, countdownIntro, popoutActive, playerVolume]);
+  }, [startTime, endTime, loopActive, isRangeEnabled, isCooldownActive, cooldownDelay, countdownIntro, popoutActive, playerVolume, isMuted]);
 
   // Web Audio synth chime to guide intervals nicely
   const playCountdownSynthTone = (freq: number, dur: number) => {
@@ -622,11 +854,14 @@ export default function App() {
 
   const initYoutubePlayerToDom = () => {
     if (!(window as any).YT || !activeVideoId) return;
+    isInitializingRef.current = true;
+    lastVideoLoadedTimeRef.current = Date.now();
     
     playerRef.current = new (window as any).YT.Player("youtube-player-frame", {
       videoId: activeVideoId,
       playerVars: {
         autoplay: 1,
+        mute: 1, // Ensure muted autoplay is guaranteed to bypass modern browser autoplay blocking
         controls: 1, // enabling default overlay simplifies scrubbers
         rel: 0,
         modestbranding: 1,
@@ -646,20 +881,31 @@ export default function App() {
           }
 
           let localStart = startTime;
+          const queryVol = localStorage.getItem("yt_loop_player_volume");
+          let targetVolume = queryVol ? parseInt(queryVol, 10) : playerVolume;
+          
           if (loadedFromBookmarkRef.current) {
             localStart = loadedFromBookmarkRef.current.startTime;
             setStartTime(loadedFromBookmarkRef.current.startTime);
             setEndTime(loadedFromBookmarkRef.current.endTime);
             setIsStartSet(true);
             setIsEndSet(true);
+            if (loadedFromBookmarkRef.current.volume !== undefined) {
+              targetVolume = loadedFromBookmarkRef.current.volume;
+            }
           } else if (duration && duration > 0) {
             setEndTime(duration);
           }
 
-          // 항상 오토플레이를 구현하기 위해 우선 mute한 다음 플레이 및 탐색(seekTo) 시그널을 강제로 보내고,
+          setPlayerVolume(targetVolume);
+          localStorage.setItem("yt_loop_player_volume", targetVolume.toString());
+
+          // 항상 오토플레이와 브라우저 제한 우회를 위해 우선 mute한 다음 플레이 및 탐색(seekTo) 시그널을 강제로 보내고,
           // 그 뒤 즉각적인 일시정지(pauseVideo) 및 unmute를 실행하여 비디오를 활성화 & 대기 상태로 맞춥니다.
           try {
-            event.target.mute();
+            if (typeof event.target.mute === "function") {
+              event.target.mute();
+            }
             event.target.seekTo(localStart, true);
             event.target.playVideo();
           } catch (e) {}
@@ -669,6 +915,10 @@ export default function App() {
           setTimeout(() => {
             try {
               if (event.target) {
+                const savedVol = localStorage.getItem("yt_loop_player_volume");
+                const currentVol = savedVol ? parseInt(savedVol, 10) : 100;
+                const savedMuted = localStorage.getItem("yt_loop_player_is_muted") === "true";
+
                 if (shouldKeepPlaying) {
                   if (typeof event.target.playVideo === "function") {
                     event.target.playVideo();
@@ -676,11 +926,13 @@ export default function App() {
                   if (typeof event.target.seekTo === "function") {
                     event.target.seekTo(localStart, true);
                   }
-                  if (typeof event.target.unmute === "function") {
-                    event.target.unmute();
-                  }
-                  if (typeof event.target.setVolume === "function") {
-                    event.target.setVolume(playerVolume);
+                  
+                  // Restore volume/mute state correctly
+                  if (savedMuted) {
+                    if (typeof event.target.mute === "function") event.target.mute();
+                  } else {
+                    if (typeof event.target.unMute === "function") event.target.unMute();
+                    if (typeof event.target.setVolume === "function") event.target.setVolume(currentVol);
                   }
                   setIsPlaying(true);
                 } else {
@@ -690,11 +942,13 @@ export default function App() {
                   if (typeof event.target.seekTo === "function") {
                     event.target.seekTo(localStart, true);
                   }
-                  if (typeof event.target.unmute === "function") {
-                    event.target.unmute();
-                  }
-                  if (typeof event.target.setVolume === "function") {
-                    event.target.setVolume(playerVolume);
+                  
+                  // Restore volume/mute state correctly
+                  if (savedMuted) {
+                    if (typeof event.target.mute === "function") event.target.mute();
+                  } else {
+                    if (typeof event.target.unMute === "function") event.target.unMute();
+                    if (typeof event.target.setVolume === "function") event.target.setVolume(currentVol);
                   }
                   setIsPlaying(false);
                 }
@@ -703,6 +957,7 @@ export default function App() {
             // Clear refs after loading completes
             loadedFromBookmarkRef.current = null;
             autoPlayIntentRef.current = false;
+            isInitializingRef.current = false;
           }, 450);
         },
         onStateChange: (event: any) => {
@@ -710,17 +965,29 @@ export default function App() {
           if (event.data === 1) {
             // Apply volume & mute settings robustly on play events
             try {
-              if (typeof event.target.unmute === "function") {
-                event.target.unmute();
-              }
-              if (typeof event.target.setVolume === "function") {
-                event.target.setVolume(playerVolume);
+              const savedMuted = localStorage.getItem("yt_loop_player_is_muted") === "true";
+              if (!popoutActive) {
+                if (savedMuted) {
+                  if (typeof event.target.mute === "function") {
+                    event.target.mute();
+                  }
+                } else {
+                  if (typeof event.target.unMute === "function") {
+                    event.target.unMute();
+                  }
+                  const savedVol = localStorage.getItem("yt_loop_player_volume");
+                  const currentVol = savedVol ? parseInt(savedVol, 10) : 100;
+                  if (typeof event.target.setVolume === "function") {
+                    event.target.setVolume(currentVol);
+                  }
+                }
               }
             } catch (volErr) {}
 
             if (popoutActive) {
-              // 듀얼모니터 전송 중에는 메인 영상이 플레이되는 것을 방지합니다.
+              // 듀얼모니터 전송 중에는 메인 영상이 플레이되는 것을 방지하고, 무조건 오디오를 물리적으로 소거(mute)합니다.
               try {
+                event.target.mute();
                 event.target.pauseVideo();
               } catch (e) {}
               setIsPlaying(true); // 버튼 UI 상태만 플레이 상태로 표시 유지 (오직 팝업만 움직이게 함)
@@ -732,10 +999,14 @@ export default function App() {
               setIsPlaying(false);
             }
           }
+          try {
+            updateIframeApiStates();
+          } catch (e) {}
         },
         onError: (event: any) => {
           console.warn("YouTube player integration error code:", event.data);
           setIsPlayerReady(true); // dismiss overlay so fallback messages/controls can be seen
+          isInitializingRef.current = false;
         }
       }
     });
@@ -748,17 +1019,24 @@ export default function App() {
       showTemporaryNotification("올바른 유튜브 링크 또는 ID를 작성해주세요 ⚠️");
       return;
     }
-    setPlayerVolume(100);
-    localStorage.setItem("yt_loop_player_volume", "100");
+    lastVideoLoadedTimeRef.current = Date.now();
+    isInitializingRef.current = true;
+    const savedVol = localStorage.getItem("yt_loop_player_volume");
+    const currentVol = savedVol ? parseInt(savedVol, 10) : playerVolume;
+    setPlayerVolume(currentVol);
     if (playerRef.current && iframeReadyRef.current) {
       try {
-        playerRef.current.setVolume(100);
-        playerRef.current.unmute();
+        playerRef.current.setVolume(currentVol);
+        if (isMuted) {
+          playerRef.current.mute();
+        } else {
+          playerRef.current.unMute();
+        }
       } catch (e) {}
     }
     setActiveVideoId(freshId);
     setVideoIdInput("");
-    showTemporaryNotification("유튜브 동영상이 로드되었습니다 ✨ (소리 크기가 최대 100%로 설정됨 🔊)");
+    showTemporaryNotification(`유튜브 동영상이 로드되었습니다 ✨ (소리 크기: ${currentVol}%)`);
   };
 
   // Speed handler adjustments
@@ -775,12 +1053,41 @@ export default function App() {
   const changeVolume = (val: number) => {
     const clamped = Math.max(0, Math.min(100, val));
     setPlayerVolume(clamped);
+    setIsMuted(false);
+    lastVolumeActionTimeRef.current = Date.now();
     localStorage.setItem("yt_loop_player_volume", clamped.toString());
+    localStorage.setItem("yt_loop_player_is_muted", "false");
     if (playerRef.current && iframeReadyRef.current) {
       try {
         playerRef.current.setVolume(clamped);
-        playerRef.current.unmute();
+        playerRef.current.unMute();
       } catch (e) {}
+    }
+  };
+
+  const toggleMute = () => {
+    lastVolumeActionTimeRef.current = Date.now();
+    const nextMute = !isMuted;
+    setIsMuted(nextMute);
+    localStorage.setItem("yt_loop_player_is_muted", String(nextMute));
+
+    if (playerRef.current && iframeReadyRef.current) {
+      try {
+        if (nextMute) {
+          playerRef.current.mute();
+          showTemporaryNotification("음소거되었습니다 🔇");
+        } else {
+          playerRef.current.unMute();
+          const savedVol = localStorage.getItem("yt_loop_player_volume");
+          const vol = savedVol ? parseInt(savedVol, 10) : playerVolume;
+          playerRef.current.setVolume(vol);
+          showTemporaryNotification(`음소거가 해제되었습니다 🔊 (볼륨: ${vol}%)`);
+        }
+      } catch (e) {
+        console.warn("Mute toggling failed in Iframe:", e);
+      }
+    } else {
+      showTemporaryNotification(nextMute ? "음소거 상태로 예약됨 🔇" : "음소거 해제 상태로 예약됨 🔊");
     }
   };
 
@@ -788,14 +1095,33 @@ export default function App() {
   const handleTogglePlay = () => {
     if (!playerRef.current) return;
     if (popoutActive) {
-      // 듀얼모니터 전송 상태일 때는 메인 동영상은 항상 pause 상태를 고수하며 작동하지 않도록 제어합니다.
-      try {
-        playerRef.current.pauseVideo();
-      } catch (e) {}
-      
+      // 듀얼모니터 전송 상태일 때도 메인 동영상을 억지 정지하지 않고, 재생 상태 명령만 자연스럽게 상호 미러링시킵니다.
       const nextPlayState = !isPlaying;
       setIsPlaying(nextPlayState);
       
+      if (iframeReadyRef.current) {
+        try {
+          playerRef.current.mute(); // 무중음 미러링 유지
+          if (nextPlayState) {
+            playerRef.current.playVideo();
+          } else {
+            playerRef.current.pauseVideo();
+          }
+        } catch (e) {}
+      }
+      
+      syncPopoutWithParent("sync_state", {
+        videoId: activeVideoId,
+        startTime,
+        endTime,
+        loopActive,
+        playbackSpeed,
+        isPlaying: nextPlayState,
+        currentTime: playerRef.current ? playerRef.current.getCurrentTime() : currentTime,
+        playerVolume,
+        isMuted
+      });
+
       showTemporaryNotification(`[보조 모니터 전송] ${nextPlayState ? "재생" : "일시정지"} 명령 전달 📺`);
       return;
     }
@@ -804,8 +1130,46 @@ export default function App() {
       playerRef.current.pauseVideo();
       setIsPlaying(false);
     } else {
+      try {
+        if (typeof playerRef.current.unMute === "function") {
+          playerRef.current.unMute();
+        }
+        const savedVol = localStorage.getItem("yt_loop_player_volume");
+        const currentVol = savedVol ? parseInt(savedVol, 10) : 100;
+        if (typeof playerRef.current.setVolume === "function") {
+          playerRef.current.setVolume(currentVol);
+        }
+      } catch (volErr) {}
       playerRef.current.playVideo();
       setIsPlaying(true);
+    }
+  };
+
+  // 구간 재생 (A-B 반복구간 전용 재생 시작)
+  const handleRangePlay = () => {
+    if (!playerRef.current || !iframeReadyRef.current) return;
+    
+    // 구간 기능 사용이 꺼져있다면 명시적으로 활성화
+    if (!isRangeEnabled) {
+      setIsRangeEnabled(true);
+      showTemporaryNotification("구간 기능이 활성화되었습니다 🔁");
+    }
+    
+    try {
+      if (typeof playerRef.current.unMute === "function") {
+        playerRef.current.unMute();
+      }
+      const savedVol = localStorage.getItem("yt_loop_player_volume");
+      const currentVol = savedVol ? parseInt(savedVol, 10) : 100;
+      if (typeof playerRef.current.setVolume === "function") {
+        playerRef.current.setVolume(currentVol);
+      }
+      playerRef.current.seekTo(startTime, true);
+      playerRef.current.playVideo();
+      setIsPlaying(true);
+      showTemporaryNotification(`지정 구간 반복 재생 시작: ${formatTimeAsSeconds(startTime)} 📍`);
+    } catch (e) {
+      console.warn("구간 재생 에러:", e);
     }
   };
 
@@ -961,7 +1325,7 @@ export default function App() {
     // If different video, swap sources first
     if (bm.videoId !== activeVideoId) {
       skipInitialResetRef.current = true;
-      loadedFromBookmarkRef.current = { startTime: bm.startTime, endTime: bm.endTime };
+      loadedFromBookmarkRef.current = { startTime: bm.startTime, endTime: bm.endTime, volume: bm.volume };
       setActiveVideoId(bm.videoId);
     } else {
       loadedFromBookmarkRef.current = null;
@@ -983,7 +1347,7 @@ export default function App() {
       if (playerRef.current && iframeReadyRef.current) {
         try {
           playerRef.current.setVolume(bm.volume);
-          playerRef.current.unmute();
+          playerRef.current.unMute();
         } catch (e) {}
       }
     }
@@ -996,6 +1360,16 @@ export default function App() {
     if (playerRef.current && iframeReadyRef.current) {
       try {
         if (autoPlay) {
+          try {
+            if (typeof playerRef.current.unMute === "function") {
+              playerRef.current.unMute();
+            }
+            const savedVol = localStorage.getItem("yt_loop_player_volume");
+            const currentVol = savedVol ? parseInt(savedVol, 10) : 100;
+            if (typeof playerRef.current.setVolume === "function") {
+              playerRef.current.setVolume(currentVol);
+            }
+          } catch (volErr) {}
           playerRef.current.playVideo();
           setIsPlaying(true);
         } else {
@@ -1255,7 +1629,7 @@ export default function App() {
             <div className="px-4 py-2.5 bg-slate-900/40 border-b border-slate-905 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-1.5 text-slate-300 font-bold select-none">
                 <Sliders className="w-3.5 h-3.5 text-indigo-400" />
-                <span>메인 동영상 화면 크기 조절</span>
+                <span>화면 크기 조절</span>
               </div>
               <div className="flex items-center gap-3.5">
                 {/* Micro Adjusters with Plus and Minus Buttons */}
@@ -1320,6 +1694,23 @@ export default function App() {
               </div>
             </div>
 
+            {/* 듀얼 모니터 전송 중 상단 미러링 컨트롤 바 */}
+            {activeVideoId && popoutActive && (
+              <div className="mx-4 mb-2 mt-2 p-2 bg-indigo-950/80 border border-indigo-500/30 rounded-xl flex items-center justify-between text-[11px] text-indigo-300 select-none animate-pulse">
+                <span className="flex items-center gap-1.5 font-semibold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  듀얼모니터 전송 중 (메인 화면은 소리가 나지 않는 초정밀 송출 컨트롤러 모드입니다.)
+                </span>
+                <button
+                  type="button"
+                  onClick={togglePopoutMode}
+                  className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold cursor-pointer"
+                >
+                  종료 및 회수 ❌
+                </button>
+              </div>
+            )}
+
             {/* Embed Video Area */}
             <div className="w-full bg-black relative">
               <div 
@@ -1328,7 +1719,7 @@ export default function App() {
                 id="youtube-player-container-ref"
               >
                 {activeVideoId ? (
-                  <div id="youtube-player-frame" className={`w-full h-full ${popoutActive ? "invisible opacity-0 pointer-events-none absolute w-0 h-0" : ""}`} />
+                  <div id="youtube-player-frame" className="w-full h-full" />
                 ) : (
                   <div className="w-full h-full bg-slate-950 flex flex-col items-center justify-center text-slate-500 p-6 text-center select-none">
                     <div className="relative mb-3">
@@ -1339,47 +1730,6 @@ export default function App() {
                     <p className="text-[11px] text-slate-500 max-w-sm mt-1.5 leading-relaxed">
                       상단 입력창에 유튜브 영상 주소를 입력하거나, 우측 하단의 <span className="text-indigo-400 font-semibold">[인스턴스 추천 리스트]</span>에서 관심 있는 영상을 선택해 주세요!
                     </p>
-                  </div>
-                )}
-
-                {/* 듀얼모니터 전송 중 오버레이 플레이트 */}
-                {activeVideoId && popoutActive && (
-                  <div className="absolute inset-0 bg-slate-950/98 flex flex-col items-center justify-center text-slate-300 z-30 p-6 text-center select-none border border-indigo-505/30 rounded-xl overflow-hidden">
-                    <div className="relative mb-5 flex items-center justify-center">
-                      <div className="absolute w-24 h-24 bg-indigo-505/15 blur-3xl rounded-full" />
-                      <div className="flex items-center gap-4 relative z-10">
-                        <div className="flex flex-col items-center">
-                          <Monitor className="w-10 h-10 text-slate-600" />
-                          <span className="text-[9px] text-slate-500 font-bold mt-1">메인 화면 (비었음)</span>
-                        </div>
-                        <div className="flex flex-col items-center animate-pulse">
-                          <span className="text-sm text-indigo-400 font-extrabold font-mono tracking-widest">──✈──▶</span>
-                          <span className="text-[8px] bg-indigo-505/20 text-indigo-300 px-1 py-0.2 rounded font-semibold mt-1">영상 신호 이탈</span>
-                        </div>
-                        <div className="flex flex-col items-center select-none">
-                          <div className="relative">
-                            <div className="absolute inset-x-0 bottom-0 bg-emerald-500/20 blur-md h-full rounded" />
-                            <Monitor className="w-10 h-10 text-emerald-400 font-bold" />
-                          </div>
-                          <span className="text-[9px] text-emerald-400 font-bold mt-1">보조 화면 (재생 중)</span>
-                        </div>
-                      </div>
-                    </div>
-                    <p className="text-sm font-extrabold text-indigo-300 tracking-wide">
-                      동영상이 보조 윈도우로 완벽하게 전송(이탈)되었습니다! 🛸
-                    </p>
-                    <p className="text-[11px] text-slate-400 max-w-md mt-2 leading-relaxed">
-                      이중 사운드 간섭 및 배터리 자원 부하를 막기 위해 <br />
-                      <strong>메인 윈도우의 동영상은 비활성화(숨김)</strong> 상태로 유지됩니다. <br />
-                      보조 모니터 팝업 창에서 최적의 화질로 구간 반복을 감상하세요!
-                    </p>
-                    <button
-                      type="button"
-                      onClick={togglePopoutMode}
-                      className="mt-4 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-555 text-white rounded-lg text-xs font-bold shadow-lg shadow-indigo-600/20 transition-all cursor-pointer"
-                    >
-                      전송 종료 및 메인 화면으로 비디오 회수
-                    </button>
                   </div>
                 )}
 
@@ -1413,6 +1763,7 @@ export default function App() {
               videoId={activeVideoId}
               isStartSet={isStartSet}
               isEndSet={isEndSet}
+              isRangeEnabled={isRangeEnabled}
             />
 
             {/* Quick Micro Adjusters for Start & End Ranges */}
@@ -1434,15 +1785,33 @@ export default function App() {
                       <span className="flex items-center gap-1">🔊 소리 설정 (볼륨)</span>
                       <strong className="text-indigo-400 font-mono bg-indigo-500/10 px-1.5 py-0.5 rounded hover:bg-indigo-500 hover:text-slate-950 transition-all">{playerVolume}%</strong>
                     </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="1"
-                      value={playerVolume}
-                      onChange={(e) => changeVolume(parseInt(e.target.value, 10))}
-                      className="w-full accent-indigo-550 cursor-ew-resize h-1 bg-slate-800 rounded-lg appearance-none block"
-                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={playerVolume}
+                        onChange={(e) => changeVolume(parseInt(e.target.value, 10))}
+                        className="flex-1 accent-indigo-550 cursor-ew-resize h-1 bg-slate-800 rounded-lg appearance-none block"
+                      />
+                      <button
+                        type="button"
+                        onClick={toggleMute}
+                        title={isMuted ? "음소거 해제" : "음소거"}
+                        className={`p-1.5 rounded-lg border transition-all active:scale-95 cursor-pointer flex items-center justify-center shrink-0 ${
+                          isMuted
+                            ? "bg-rose-500/20 border-rose-500/40 text-rose-450 hover:bg-rose-500/30"
+                            : "bg-slate-950 border-slate-850 hover:bg-slate-900 text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        {isMuted ? (
+                          <VolumeX className="w-3.5 h-3.5" />
+                        ) : (
+                          <Volume2 className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   {/* 재생 속도 슬라이더 */}
@@ -1482,13 +1851,13 @@ export default function App() {
                   </span>
                 </div>
 
-                <div className="flex items-center justify-center gap-4 py-1.5">
+                <div className="flex items-center justify-center gap-2.5 py-1.5 flex-nowrap">
                   {/* 10 seconds back */}
                   <button
                     onClick={() => handleSeekRelative(-10)}
                     type="button"
                     title="10초 뒤로 탐색"
-                    className="p-3 rounded-full bg-slate-950 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-all active:scale-90 cursor-pointer"
+                    className="w-9.5 h-9.5 rounded-full bg-slate-950 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-all active:scale-90 cursor-pointer flex items-center justify-center shrink-0"
                   >
                     <SkipBack className="w-4 h-4" />
                   </button>
@@ -1498,13 +1867,28 @@ export default function App() {
                     onClick={handleTogglePlay}
                     type="button"
                     title={isPlaying ? "일시정지" : "재생"}
-                    className="w-14 h-14 rounded-full bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white transition-all cursor-pointer flex items-center justify-center shadow-xl shadow-indigo-500/25 active:scale-95 border border-indigo-450 hover:border-white"
+                    className="w-12 h-12 rounded-full bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white transition-all cursor-pointer flex items-center justify-center shadow-xl shadow-indigo-500/25 active:scale-95 border border-indigo-450 hover:border-white shrink-0"
                   >
                     {isPlaying ? (
-                      <Pause className="w-5 h-5 fill-current text-white" />
+                      <Pause className="w-4.5 h-4.5 fill-current text-white" />
                     ) : (
-                      <Play className="w-5 h-5 fill-current text-white ml-0.5" />
+                      <Play className="w-4.5 h-4.5 fill-current text-white ml-0.5" />
                     )}
+                  </button>
+
+                  {/* 구간 전용 재생 버튼 (Range Play) - 플레이 오른쪽에 배치 및 텍스트 없음 */}
+                  <button
+                    onClick={handleRangePlay}
+                    disabled={!isRangeEnabled}
+                    type="button"
+                    title={isRangeEnabled ? "선택한 구간에서만 재생하기 [A-B 반복 재생]" : "구간 기능이 비활성화되어 사용할 수 없습니다"}
+                    className={`w-9.5 h-9.5 rounded-full border transition-all active:scale-95 flex items-center justify-center shrink-0 ${
+                      isRangeEnabled
+                        ? "cursor-pointer bg-emerald-600 border-emerald-400 text-white animate-pulse shadow-lg shadow-emerald-550/20 hover:bg-emerald-550"
+                        : "cursor-not-allowed opacity-30 bg-slate-900 border-slate-850 text-slate-500"
+                    }`}
+                  >
+                    <Repeat className="w-4 h-4" />
                   </button>
 
                   {/* 10 seconds forward */}
@@ -1512,7 +1896,7 @@ export default function App() {
                     onClick={() => handleSeekRelative(10)}
                     type="button"
                     title="10초 앞으로 탐색"
-                    className="p-3 rounded-full bg-slate-950 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-all active:scale-90 cursor-pointer"
+                    className="w-9.5 h-9.5 rounded-full bg-slate-950 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-all active:scale-90 cursor-pointer flex items-center justify-center shrink-0"
                   >
                     <SkipForward className="w-4 h-4" />
                   </button>
@@ -1725,6 +2109,562 @@ export default function App() {
                   </div>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* 유튜브 Iframe Player API 실시간 제어 센터 (Official YouTube Iframe Player API Control Panel) */}
+          <div className={`bg-slate-900/60 p-4 rounded-2xl border border-slate-800 transition-all duration-300 ${apiCardCollapsed ? "space-y-0" : "space-y-3"}`}>
+            <div 
+              onClick={() => {
+                const nextVal = !apiCardCollapsed;
+                setApiCardCollapsed(nextVal);
+                localStorage.setItem("yt_loop_api_card_collapsed", String(nextVal));
+              }}
+              className="flex items-center justify-between cursor-pointer group select-none"
+            >
+              <h4 className="text-xs font-bold text-amber-400 flex items-center gap-2 font-display">
+                <Sliders className="w-4 h-4 text-amber-400 animate-pulse" />
+                <span>유튜브 Iframe 플레이어 API 제어 센터</span>
+                <span className="text-[8px] bg-amber-500/10 text-amber-300 px-1 py-0.5 rounded uppercase leading-none font-sans font-bold">Official Client API</span>
+              </h4>
+              <button
+                type="button"
+                className="text-[10px] text-slate-500 group-hover:text-amber-400 transition-colors font-semibold"
+              >
+                {apiCardCollapsed ? "펼치기 ＋" : "접기 －"}
+              </button>
+            </div>
+
+            {!apiCardCollapsed && (
+              <>
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  브라우저 보안 샌드박스 크로스도메인 CORS 한계를 우회하여, 유튜브 공식 Iframe Player SDK에서 실시간 바인딩 제공하는 오리지널 메타데이터 정보 및 재생 특성을 완벽히 직접 제어합니다.
+                </p>
+
+                {!activeVideoId ? (
+                  <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3 text-center text-slate-500 text-[11px] py-4">
+                    ⚠️ 상단의 검색이나 링크를 이용해 동영상을 먼저 로드해 주세요.
+                  </div>
+                ) : (
+                  <div className="space-y-4 pt-1">
+                    
+                    {/* 실시간 플레이어 상태 정보 */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-850/50">
+                        <div className="text-[9px] text-slate-500 font-mono mb-0.5">API Player State</div>
+                        <div className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            apiPlayerState === 1 ? "bg-emerald-500 animate-ping" : 
+                            apiPlayerState === 2 ? "bg-amber-500" :
+                            apiPlayerState === 3 ? "bg-orange-500 animate-pulse" :
+                            apiPlayerState === 0 ? "bg-slate-500" : "bg-blue-500"
+                          }`} />
+                          {apiPlayerState === -1 && "시작 안 됨 (-1)"}
+                          {apiPlayerState === 0 && "재생 완료 (0)"}
+                          {apiPlayerState === 1 && "재생 중 (1)"}
+                          {apiPlayerState === 2 && "일시중지 (2)"}
+                          {apiPlayerState === 3 && "버퍼링 중 (3)"}
+                          {apiPlayerState === 5 && "영상 로드대기 (5)"}
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-850/50">
+                        <div className="text-[9px] text-slate-500 font-mono mb-0.5">영상 화질 등급</div>
+                        <div className="text-[11px] font-bold text-amber-300 font-sans truncate">
+                          {apiCurrentQuality ? apiCurrentQuality.toUpperCase() : "AUTO"}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 실시간 소리 (볼륨 및 음소거) API 제어 스테이션 */}
+                    <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-850/50 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-sans font-bold text-slate-300 flex items-center gap-1.5">
+                          <Volume2 className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Iframe 소리 볼륨 및 음소거 API 제어</span>
+                        </span>
+                        <span className={`text-[8.5px] font-mono px-1.5 py-0.5 rounded leading-none ${
+                          apiIsMuted ? "bg-rose-500/15 text-rose-400" : "bg-emerald-500/15 text-emerald-400"
+                        }`}>
+                          {apiIsMuted ? "MUTE (음소거됨)" : "SOUND ON"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!playerRef.current || !iframeReadyRef.current) return;
+                            try {
+                              const toggleToMuted = !apiIsMuted;
+                              if (toggleToMuted) {
+                                playerRef.current.mute();
+                                setApiIsMuted(true);
+                                setIsMuted(true);
+                                localStorage.setItem("yt_loop_player_is_muted", "true");
+                                showTemporaryNotification(`🔇 API 제어: 음소거 모드로 전환했습니다.`);
+                              } else {
+                                playerRef.current.unMute();
+                                setApiIsMuted(false);
+                                setIsMuted(false);
+                                localStorage.setItem("yt_loop_player_is_muted", "false");
+                                const savedVol = localStorage.getItem("yt_loop_player_volume");
+                                const vol = savedVol ? parseInt(savedVol, 10) : playerVolume;
+                                playerRef.current.setVolume(vol);
+                                showTemporaryNotification(`🔊 API 제어: 음소거를 해제했습니다.`);
+                              }
+                            } catch (err) {}
+                          }}
+                          className={`p-1.5 rounded-lg border transition-all text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0 cursor-pointer ${
+                            apiIsMuted 
+                              ? "bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border-rose-500/30" 
+                              : "bg-slate-900 hover:bg-slate-850 text-slate-300 border-slate-750"
+                          }`}
+                          title="음소거 토글 API (mute / unMute)"
+                        >
+                          {apiIsMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                          <span className="text-[9.5px]">{apiIsMuted ? "음소거 해제" : "음소거 적용"}</span>
+                        </button>
+
+                        <div className="flex-1 space-y-1">
+                          <div className="flex justify-between text-[9px] text-slate-500 font-mono">
+                            <span>setVolume({apiVolume})</span>
+                            <span className="text-amber-400/90 font-bold">{apiVolume}%</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-500">0</span>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={apiVolume}
+                              onChange={(e) => {
+                                const newVol = parseInt(e.target.value, 10);
+                                setApiVolume(newVol);
+                                setPlayerVolume(newVol);
+                                if (playerRef.current && iframeReadyRef.current) {
+                                  try {
+                                    playerRef.current.setVolume(newVol);
+                                    if (apiIsMuted) {
+                                      playerRef.current.unMute();
+                                      setApiIsMuted(false);
+                                      setIsMuted(false);
+                                      localStorage.setItem("yt_loop_player_is_muted", "false");
+                                    }
+                                  } catch (e) {}
+                                }
+                              }}
+                              className="flex-1 accent-amber-500 h-1 bg-slate-900 rounded-lg appearance-none cursor-pointer"
+                              style={{ background: `linear-gradient(to right, rgb(245, 158, 11) 0%, rgb(245, 158, 11) ${apiVolume}%, rgb(30, 41, 59) ${apiVolume}%, rgb(30, 41, 59) 100%)` }}
+                            />
+                            <span className="text-[10px] text-slate-500">100</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-[8.5px] text-slate-550 leading-normal border-t border-slate-850/50 pt-1.5 flex justify-between items-center font-mono">
+                        <span>• player.getVolume(): <strong className="text-amber-500">{apiVolume}</strong></span>
+                        <span>• player.isMuted(): <strong className={apiIsMuted ? "text-rose-450" : "text-emerald-400"}>{apiIsMuted ? "true" : "false"}</strong></span>
+                      </div>
+                    </div>
+
+                    {/* 실시간 프리-버퍼링 모니터 */}
+                    <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-850/50 space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-slate-400 font-sans font-medium">스트림 프리-버퍼링 비율</span>
+                        <span className="text-amber-400 font-mono font-bold">{(apiLoadedFraction * 100).toFixed(1)}%</span>
+                      </div>
+                      <div className="h-2 bg-slate-900 rounded-full overflow-hidden relative border border-slate-800/40">
+                        <div 
+                          className="h-full bg-gradient-to-r from-amber-600 to-amber-500 transition-all duration-300 rounded-full"
+                          style={{ width: `${Math.min(100, apiLoadedFraction * 100)}%` }}
+                        />
+                      </div>
+                      <div className="text-[8.5px] text-slate-500 leading-none">
+                        * 플레이어가 다음 섹션을 위해 미리 다운로드(인메모리 캐싱) 완료한 비율입니다.
+                      </div>
+                    </div>
+
+                    {/* 실시간 강제 화질 지시 제어기 */}
+                    <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-850/50 space-y-2">
+                      <div className="text-[10px] font-sans font-bold text-slate-300 flex items-center gap-1.5">
+                        <Monitor className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Iframe 화질(해상도) 강제 변경</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[
+                          { label: "1080P", value: "hd1080" },
+                          { label: "720P", value: "hd720" },
+                          { label: "480P", value: "large" },
+                          { label: "360P", value: "medium" },
+                          { label: "240P", value: "small" },
+                          { label: "자동", value: "default" }
+                        ].map((q) => {
+                          const isSelected = apiCurrentQuality === q.value;
+                          const isAvailable = apiAvailableQualities.length === 0 || apiAvailableQualities.includes(q.value);
+                          return (
+                            <button
+                              key={q.value}
+                              type="button"
+                              disabled={!isAvailable}
+                              onClick={() => {
+                                if (playerRef.current && iframeReadyRef.current) {
+                                  try {
+                                    playerRef.current.setPlaybackQuality(q.value);
+                                    setApiCurrentQuality(q.value);
+                                    showTemporaryNotification(`📺 화질을 [${q.label}] 등급으로 지시했습니다.`);
+                                  } catch (e) {}
+                                }
+                              }}
+                              className={`text-[9.5px] py-1 rounded-md font-mono font-bold border transition-all cursor-pointer ${
+                                isSelected
+                                  ? "bg-amber-500/15 border-amber-500/80 text-amber-300 shadow-md shadow-amber-950/25"
+                                  : !isAvailable
+                                    ? "bg-slate-950/20 border-slate-900/30 text-slate-700 cursor-not-allowed opacity-50"
+                                    : "bg-slate-950/50 hover:bg-slate-950 border-slate-850 text-slate-400 hover:text-slate-200"
+                              }`}
+                              title={!isAvailable ? "해당 유튜브 환경에서 지원되지 않는 해상도입니다." : `${q.label} 화질 강제 지정`}
+                            >
+                              {q.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 공식 플레이어 자막 트랙 상태 트래커 */}
+                    <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-850/50 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-sans font-bold text-slate-300 flex items-center gap-1.5">
+                          <Languages className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Iframe 내장 자막 (CC) 컨트롤</span>
+                        </span>
+                        <span className={`text-[8.5px] font-mono px-1.5 py-0.5 rounded leading-none ${
+                          apiCaptionsEnabled ? "bg-emerald-500/15 text-emerald-400" : "bg-slate-850 text-slate-500"
+                        }`}>
+                          {apiCaptionsEnabled ? "활성화됨" : "비활성화"}
+                        </span>
+                      </div>
+                      
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!playerRef.current || !iframeReadyRef.current) return;
+                          try {
+                            const nextState = !apiCaptionsEnabled;
+                            if (nextState) {
+                              // Force load CC module and request Korean subtitles
+                              playerRef.current.loadModule("captions");
+                              playerRef.current.setOption("captions", "track", { languageCode: "ko" });
+                              showTemporaryNotification("💬 플레이어 내장 한국어 자막 탑재를 지시했습니다.");
+                            } else {
+                              playerRef.current.unloadModule("captions");
+                              showTemporaryNotification("❌ 자막 모듈을 언로드 지시했습니다.");
+                            }
+                            setApiCaptionsEnabled(nextState);
+                          } catch (e) {
+                            showTemporaryNotification("자막 트랙 조종은 현재 영상의 소스 권한에 의존합니다.");
+                          }
+                        }}
+                        className={`w-full py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          apiCaptionsEnabled
+                            ? "bg-emerald-950/30 border-emerald-500/60 text-emerald-400 hover:bg-emerald-950/50"
+                            : "bg-slate-950/50 hover:bg-slate-950 border-slate-850 text-slate-300 hover:text-slate-100"
+                        }`}
+                      >
+                        <Languages className="w-3.5 h-3.5" />
+                        <span>{apiCaptionsEnabled ? "Iframe 내장 자막 끄기" : "Iframe 내장 한국어 자막 강제 켜기"}</span>
+                      </button>
+                    </div>
+
+                    {/* 가용한 정밀 배속 탐색기 */}
+                    <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-850/50 space-y-2">
+                      <div className="text-[10px] font-sans font-bold text-slate-300 flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                        <span>지원 배속 직접 탐색 선택 (Supported Rates)</span>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-1">
+                        {(apiAvailableRates.length > 0 ? apiAvailableRates : [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]).map((rate) => {
+                          const isSelected = Math.abs(playbackSpeed - rate) < 0.05;
+                          return (
+                            <button
+                              key={rate}
+                              type="button"
+                              onClick={() => {
+                                setPlaybackSpeed(rate);
+                                if (playerRef.current && iframeReadyRef.current && typeof playerRef.current.setPlaybackRate === "function") {
+                                  try {
+                                    playerRef.current.setPlaybackRate(rate);
+                                    showTemporaryNotification(`⚡ 플레이 속도를 ${rate}배속으로 직접 조정했습니다.`);
+                                  } catch (e) {}
+                                }
+                              }}
+                              className={`text-[9.5px] px-2 py-1 rounded-md font-mono font-medium border transition-all cursor-pointer ${
+                                isSelected
+                                  ? "bg-amber-500/15 border-amber-500 text-amber-300"
+                                  : "bg-slate-950/50 hover:bg-slate-950 border-slate-850 text-slate-400 hover:text-slate-200"
+                              }`}
+                            >
+                              x{rate}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 플레이어 실시간 디버그 사양 요약 */}
+                    <div className="bg-slate-950/40 p-2 rounded-xl text-[9px] text-slate-500 font-mono space-y-1">
+                      <div className="flex justify-between">
+                        <span>Video ID:</span>
+                        <span className="text-slate-400 font-sans">{apiVideoData?.video_id || activeVideoId}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Title:</span>
+                        <span className="text-slate-400 truncate max-w-[150px] font-sans" title={apiVideoData?.title || videoMeta.title}>
+                          {apiVideoData?.title || videoMeta.title}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Channel:</span>
+                        <span className="text-slate-400 truncate max-w-[150px] font-sans" title={apiVideoData?.author || videoMeta.channelTitle}>
+                          {apiVideoData?.author || videoMeta.channelTitle}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Buffered:</span>
+                        <span className="text-slate-400">{(apiLoadedFraction * 100).toFixed(1)}%</span>
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* AI 스마트 자동 구간 추출 기능 (AI-Assisted Smart Range Slicing) */}
+          <div className={`bg-slate-900/60 p-4 rounded-2xl border border-slate-800 transition-all duration-300 ${aiCardCollapsed ? "space-y-0" : "space-y-3"}`}>
+            <div 
+              onClick={() => {
+                const nextVal = !aiCardCollapsed;
+                setAiCardCollapsed(nextVal);
+                localStorage.setItem("yt_loop_ai_card_collapsed", String(nextVal));
+              }}
+              className="flex items-center justify-between cursor-pointer group select-none"
+            >
+              <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-2 font-display">
+                <Brain className="w-4 h-4 text-emerald-400 animate-pulse" />
+                <span>AI 스마트 자동 구간 추출</span>
+                <span className="text-[8px] bg-emerald-500/10 text-emerald-300 px-1 py-0.5 rounded uppercase leading-none font-sans font-bold">Gemini 3.5</span>
+              </h4>
+              <button
+                type="button"
+                className="text-[10px] text-slate-500 group-hover:text-emerald-400 transition-colors font-semibold"
+              >
+                {aiCardCollapsed ? "펼치기 ＋" : "접기 －"}
+              </button>
+            </div>
+
+            {!aiCardCollapsed && (
+              <>
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  사용자가 매번 타임코드를 잡지 않아도, AI가 영상의 오디오 스트림과 자막을 분석해 문장별 리핏 칩(STT)을 생성하고, 비전 장면 전환을 감지합니다.
+                </p>
+
+                {!activeVideoId ? (
+                  <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3 text-center text-slate-500 text-[11px] py-4">
+                    ⚠️ 상단의 검색이나 링크를 이용해 동영상을 먼저 로드해 주세요.
+                  </div>
+                ) : (
+                  <div className="space-y-3 pt-1">
+                    {/* 만약 분석하지 않은 상태라면 실행 버튼 표시 */}
+                    {!aiAnalysisCache[activeVideoId] && !isAnalyzingVideo && (
+                      <button
+                        onClick={handleAnalyzeVideo}
+                        type="button"
+                        className="w-full bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-bold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/25 cursor-pointer hover:shadow-emerald-950 active:scale-98"
+                      >
+                        <Cpu className="w-3.5 h-3.5" />
+                        <span>Gemini AI 초정밀 자동 분석 시작</span>
+                      </button>
+                    )}
+
+                    {/* 분석 진행중인 로딩바 피드백 */}
+                    {isAnalyzingVideo && (
+                      <div className="bg-slate-950/80 border border-emerald-500/20 rounded-xl p-4 space-y-3 text-center relative overflow-hidden">
+                        <div className="absolute top-0 left-0 h-1 bg-emerald-500 w-full animate-pulse" />
+                        <Loader2 className="w-7 h-7 animate-spin text-emerald-400 mx-auto" />
+                        <div className="space-y-1">
+                          <h5 className="text-[11px] font-bold text-slate-200">AI가 동영상을 실시간 정밀 분석 중...</h5>
+                          <p className="text-[9.5px] text-slate-500 animate-pulse font-mono">
+                            [1/3] 음성 인식 및 문장 단위 분할 매핑 중
+                          </p>
+                          <p className="text-[9px] text-slate-600 select-none">
+                            잠시만 기다려 주시면 의미 있는 대화 단위와 컷 전환을 매핑합니다.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 분석 완료되었을 때 결과 목록 노출 */}
+                    {aiAnalysisCache[activeVideoId] && (
+                      <div className="space-y-3">
+                        {/* 정보 카드 */}
+                        <div className="flex items-center justify-between bg-slate-950/80 border border-slate-850 px-2.5 py-1.5 rounded-xl text-[10px]">
+                          <span className="text-slate-400 font-medium flex items-center gap-1.5 truncate pr-2">
+                            <Sparkles className="w-3 h-3 text-emerald-400 shrink-0" />
+                            주제 분류: <strong className="text-emerald-300 font-sans truncate">{aiAnalysisCache[activeVideoId].topic}</strong>
+                          </span>
+                          <button
+                            onClick={handleAnalyzeVideo}
+                            className="text-[9px] text-slate-500 hover:text-indigo-400 transition-colors underline bg-transparent border-0 cursor-pointer shrink-0"
+                            type="button"
+                            title="클릭 시 다시 분석을 요청합니다."
+                          >
+                            재분석
+                          </button>
+                        </div>
+
+                        {/* Tab Navigation */}
+                        <div className="flex border-b border-slate-850 text-xs">
+                          <button
+                            onClick={() => setAnalysisTab("speech")}
+                            type="button"
+                            className={`flex-1 pb-1.5 font-bold transition-all border-b-2 text-center text-[11px] cursor-pointer ${
+                              analysisTab === "speech"
+                                ? "text-emerald-400 border-emerald-500"
+                                : "text-slate-500 border-transparent hover:text-slate-300"
+                            }`}
+                          >
+                            <span className="flex items-center justify-center gap-1 py-0.5">
+                              <Languages className="w-3.5 h-3.5" />
+                              문장 슬라이싱 ({aiAnalysisCache[activeVideoId].sentences?.length || 0})
+                            </span>
+                          </button>
+                          <button
+                            onClick={() => setAnalysisTab("vision")}
+                            type="button"
+                            className={`flex-1 pb-1.5 font-bold transition-all border-b-2 text-center text-[11px] cursor-pointer ${
+                              analysisTab === "vision"
+                                ? "text-emerald-400 border-emerald-500"
+                                : "text-slate-500 border-transparent hover:text-slate-300"
+                            }`}
+                          >
+                            <span className="flex items-center justify-center gap-1 py-0.5">
+                              <Eye className="w-3.5 h-3.5" />
+                              장면 감지 ({aiAnalysisCache[activeVideoId].scenes?.length || 0})
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Tab Content 1: Speech-to-Text sentence chips list */}
+                        {analysisTab === "speech" && (
+                          <div className="space-y-1.5">
+                            <p className="text-[9.5px] text-slate-500 leading-normal mb-1">
+                              💡 문장 칩을 <strong>클릭</strong>하면 그 말하는 시작 시점으로 즉시 이동하며, <strong>구간 반복 기능은 자동으로 꺼집니다</strong>.
+                            </p>
+                            <div className="flex flex-wrap gap-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-850">
+                              {aiAnalysisCache[activeVideoId].sentences?.map((s, idx) => {
+                                const isCurrentlyPlaying = (currentTime >= s.startTime && currentTime <= s.endTime);
+                                return (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => {
+                                      setIsRangeEnabled(false);
+                                      setLoopActive(false);
+                                      handleSeekToTime(s.startTime);
+                                      if (playerRef.current && iframeReadyRef.current) {
+                                        try {
+                                          playerRef.current.playVideo();
+                                          setIsPlaying(true);
+                                        } catch(e){}
+                                      }
+                                      showTemporaryNotification(`📍 문장 시점으로 점프 (구간반복 꺼짐)`);
+                                    }}
+                                    className={`text-[10px] text-left p-2 rounded-lg border transition-all cursor-pointer w-full relative ${
+                                      isCurrentlyPlaying
+                                        ? "bg-emerald-950/20 border-emerald-500/85 text-emerald-300 ring-1 ring-emerald-500/20 shadow-md shadow-emerald-950/20"
+                                        : "bg-slate-950/60 hover:bg-slate-950 border-slate-850 text-slate-300 hover:text-slate-200 hover:border-slate-800"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-1.5 mb-1 text-[9.5px] select-none">
+                                      <span className="font-mono text-emerald-400 font-bold bg-emerald-500/15 px-1.5 py-0.5 rounded leading-none">
+                                        {formatTimeAsSeconds(s.startTime)} ~ {formatTimeAsSeconds(s.endTime)}
+                                      </span>
+                                      {isCurrentlyPlaying && (
+                                        <span className="text-[8px] font-sans font-bold text-emerald-300 animate-pulse bg-emerald-500/10 px-1 py-0.5 rounded uppercase leading-none shrink-0">
+                                          🔊 재생 중
+                                        </span>
+                                      )}
+                                      <span className="text-slate-500 text-[8px] font-mono shrink-0">#{idx + 1}</span>
+                                    </div>
+                                    <div className="leading-relaxed text-[10px] break-all">{s.text}</div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Tab Content 2: Computer vision chapters/slide change list */}
+                        {analysisTab === "vision" && (
+                          <div className="space-y-1.5">
+                            <p className="text-[9.5px] text-slate-500 leading-normal mb-1">
+                              💡 클릭하면 <strong>해당 장면 시각으로 즉시 이동</strong>하고, <strong>구간 반복 기능은 자동으로 꺼집니다</strong>.
+                            </p>
+                            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-850">
+                              {aiAnalysisCache[activeVideoId].scenes?.map((sc, idx) => {
+                                const isHighlighted = (Math.abs(currentTime - sc.time) <= 1.5);
+                                return (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => {
+                                      setIsRangeEnabled(false);
+                                      setLoopActive(false);
+                                      handleSeekToTime(sc.time);
+                                      if (playerRef.current && iframeReadyRef.current) {
+                                        try {
+                                          playerRef.current.playVideo();
+                                          setIsPlaying(true);
+                                        } catch(e){}
+                                      }
+                                      showTemporaryNotification(`📍 장면 감지 점프 (구간반복 꺼짐)`);
+                                    }}
+                                    className={`w-full p-2 text-left rounded-lg border text-xs flex items-start gap-2.5 cursor-pointer transition-all ${
+                                      isHighlighted
+                                        ? "bg-slate-900 border-amber-500"
+                                        : "bg-slate-950/60 hover:bg-slate-950 border-slate-850 hover:border-slate-800"
+                                    }`}
+                                  >
+                                    <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded leading-none shrink-0 mt-0.5 ${
+                                      isHighlighted ? "bg-amber-500/20 text-amber-300" : "bg-slate-800 text-slate-400"
+                                    }`}>
+                                      {formatTimeAsSeconds(sc.time)}
+                                    </span>
+                                    <div className="min-w-0 flex-1 space-y-0.5">
+                                      <div className="font-bold text-[10.5px] text-slate-200 truncate">{sc.chapterName}</div>
+                                      <div className="text-[9px] text-slate-450 line-clamp-2 leading-normal">{sc.description}</div>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {aiAnalysisCache[activeVideoId]?.note && (
+                          <p className="text-[8.5px] text-amber-400/80 italic text-center mt-1 select-none leading-normal">
+                            ℹ️ {aiAnalysisCache[activeVideoId].note}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
 
