@@ -221,34 +221,109 @@ async function startServer() {
       return res.status(500).json({ error: error.message, items: [] });
     }
   });
+  async function getYouTubeSubtitles(videoId) {
+    const apiKey = process.env.SUPADATA_API_KEY || "sd_9964138a6d01328a8dab270b52d9d69d";
+    if (apiKey) {
+      try {
+        const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        const supadataUrl = `https://api.supadata.ai/v1/youtube/transcript?url=${encodeURIComponent(watchUrl)}`;
+        console.log(`Attempting to retrieve YouTube subtitles from Supadata API for videoId: ${videoId}...`);
+        const response = await fetch(supadataUrl, {
+          method: "GET",
+          headers: {
+            "x-api-key": apiKey,
+            "Authorization": `Bearer ${apiKey}`,
+            "Accept": "application/json"
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          console.log("Successfully fetched YouTube transcript from Supadata API!");
+          let rawList = [];
+          if (Array.isArray(data)) {
+            rawList = data;
+          } else if (data && Array.isArray(data.transcript)) {
+            rawList = data.transcript;
+          } else if (data && Array.isArray(data.segments)) {
+            rawList = data.segments;
+          } else if (data && Array.isArray(data.subtitles)) {
+            rawList = data.subtitles;
+          } else if (data && Array.isArray(data.data)) {
+            rawList = data.data;
+          } else if (data && typeof data === "object") {
+            const arrProp = Object.values(data).find((val) => Array.isArray(val));
+            if (arrProp) {
+              rawList = arrProp;
+            }
+          }
+          if (rawList && rawList.length > 0) {
+            return rawList.map((item) => {
+              let start = 0;
+              if ("start" in item) {
+                start = parseFloat(item.start);
+              } else if ("offset" in item) {
+                start = parseFloat(item.offset) / 1e3;
+              } else if ("startTime" in item) {
+                start = parseFloat(item.startTime);
+              } else if ("time" in item) {
+                start = parseFloat(item.time);
+              }
+              let text = "";
+              if ("text" in item) {
+                text = String(item.text);
+              } else if ("sentence" in item) {
+                text = String(item.sentence);
+              } else if ("content" in item) {
+                text = String(item.content);
+              }
+              return {
+                start: isNaN(start) ? 0 : start,
+                text: text ? text.trim() : ""
+              };
+            });
+          }
+        } else {
+          const errText = await response.text();
+          console.warn(`Supadata API non-ok status [${response.status}]:`, errText);
+        }
+      } catch (err) {
+        console.warn("Supadata API exception occurred:", err.message);
+      }
+    }
+    console.log(`Falling back to local youtube-captions-scraper for videoId: ${videoId}...`);
+    let captions = [];
+    try {
+      captions = await (0, import_youtube_captions_scraper.getSubtitles)({
+        videoID: videoId,
+        lang: "ko"
+      });
+    } catch (koErr) {
+      console.log(`Failed ko scraper for ${videoId}, trying default/en...`);
+      try {
+        captions = await (0, import_youtube_captions_scraper.getSubtitles)({
+          videoID: videoId,
+          lang: "en"
+        });
+      } catch (enErr) {
+        console.log(`Failed both ko/en scraper for ${videoId}`);
+      }
+    }
+    if (captions && captions.length > 0) {
+      return captions.map((c) => ({
+        start: parseFloat(c.start) || 0,
+        text: c.text ? c.text.trim() : ""
+      }));
+    }
+    return [];
+  }
   app.get("/api/youtube-subtitles", async (req, res) => {
     const videoId = req.query.videoId;
     if (!videoId) {
       return res.status(400).json({ error: "videoId is required", subtitles: [] });
     }
     try {
-      let captions = [];
-      try {
-        captions = await (0, import_youtube_captions_scraper.getSubtitles)({
-          videoID: videoId,
-          lang: "ko"
-        });
-      } catch (koErr) {
-        console.log(`Failed ko subtitles for ${videoId}, trying default/en...`);
-        try {
-          captions = await (0, import_youtube_captions_scraper.getSubtitles)({
-            videoID: videoId,
-            lang: "en"
-          });
-        } catch (enErr) {
-          console.log(`Failed both ko/en subtitles for ${videoId}`);
-        }
-      }
-      if (captions && captions.length > 0) {
-        const list = captions.map((c) => ({
-          start: parseFloat(c.start) || 0,
-          text: c.text ? c.text.trim() : ""
-        }));
+      const list = await getYouTubeSubtitles(videoId);
+      if (list && list.length > 0) {
         return res.json({ subtitles: list, videoId });
       } else {
         return res.json({
@@ -263,7 +338,7 @@ async function startServer() {
         });
       }
     } catch (e) {
-      console.warn("Subtitles error, sending fallback list:", e.message);
+      console.warn("Subtitles endpoint error, sending fallback list:", e.message);
       return res.json({
         subtitles: [
           { start: 0, text: "[\uC548\uB0B4] \uC774 \uC601\uC0C1\uC5D0\uB294 \uC790\uB3D9 \uCD94\uCD9C\uC774 \uC9C0\uC5F0\uB418\uAC70\uB098 \uC81C\uACF5\uB418\uC9C0 \uC54A\uB294 \uC790\uB9C9 \uAD6C\uC870\uC785\uB2C8\uB2E4." }
@@ -276,26 +351,12 @@ async function startServer() {
   async function fetchTranscript(videoId) {
     if (!videoId) return "";
     try {
-      const captions = await (0, import_youtube_captions_scraper.getSubtitles)({
-        videoID: videoId,
-        lang: "en"
-      });
-      if (captions && captions.length > 0) {
-        return captions.map((c) => `[${parseFloat(c.start).toFixed(1)}s] ${c.text.trim()}`).join("\n");
+      const subtitles = await getYouTubeSubtitles(videoId);
+      if (subtitles && subtitles.length > 0) {
+        return subtitles.map((s) => `[${s.start.toFixed(1)}s] ${s.text}`).join("\n");
       }
-    } catch (errEn) {
-      console.log(`Failed to fetch EN subtitles for ${videoId}, trying KO...`);
-      try {
-        const captionsKo = await (0, import_youtube_captions_scraper.getSubtitles)({
-          videoID: videoId,
-          lang: "ko"
-        });
-        if (captionsKo && captionsKo.length > 0) {
-          return captionsKo.map((c) => `[${parseFloat(c.start).toFixed(1)}s] ${c.text.trim()}`).join("\n");
-        }
-      } catch (errKo) {
-        console.log(`Failed to fetch KO subtitles for ${videoId}.`);
-      }
+    } catch (err) {
+      console.warn("fetchTranscript failed:", err);
     }
     return "";
   }
