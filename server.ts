@@ -238,6 +238,65 @@ async function startServer() {
     }
   });
 
+  // API to fetch raw subtitles for "자막GOTO"
+  app.get("/api/youtube-subtitles", async (req, res) => {
+    const videoId = req.query.videoId as string;
+    if (!videoId) {
+      return res.status(400).json({ error: "videoId is required", subtitles: [] });
+    }
+    
+    try {
+      let captions: any[] = [];
+      try {
+        // @ts-ignore
+        captions = await getSubtitles({
+          videoID: videoId,
+          lang: "ko"
+        });
+      } catch (koErr) {
+        console.log(`Failed ko subtitles for ${videoId}, trying default/en...`);
+        try {
+          // @ts-ignore
+          captions = await getSubtitles({
+            videoID: videoId,
+            lang: "en"
+          });
+        } catch (enErr) {
+          console.log(`Failed both ko/en subtitles for ${videoId}`);
+        }
+      }
+      
+      if (captions && captions.length > 0) {
+        const list = captions.map((c: any) => ({
+          start: parseFloat(c.start) || 0,
+          text: c.text ? c.text.trim() : ""
+        }));
+        return res.json({ subtitles: list, videoId });
+      } else {
+        // Safe, clean default mock interactive subtitles so the UI always functions perfectly
+        return res.json({ 
+          subtitles: [
+            { start: 0.0, text: "안녕하세요! 해당 영상은 유튜브 공식 대외 자막 서비스가 비활성화된 생태입니다 🔇" },
+            { start: 10.0, text: "하지만 오른쪽 아래 [추천 리스트]에서 다른 영어 회화 강좌나 코딩 영상을 고르시면 실제 유튜브에서 자막을 실시간으로 무한 추출합니다 🌟" },
+            { start: 30.0, text: "구간반복 학습 도중에 원하는 자막 문장을 선택하여 자막 GOTO를 눌러주시면 그 즉시 해당 시간으로 이동합니다." },
+            { start: 60.0, text: "그 밖에 상단 검색 콘솔이나 주소 입력을 활용해 다른 고품질의 영상 학습을 시도해 보세요!" }
+          ], 
+          videoId,
+          isNoSubtitleFallback: true
+        });
+      }
+    } catch (e: any) {
+      console.warn("Subtitles error, sending fallback list:", e.message);
+      return res.json({
+        subtitles: [
+          { start: 0.0, text: "[안내] 이 영상에는 자동 추출이 지연되거나 제공되지 않는 자막 구조입니다." }
+        ],
+        videoId,
+        isNoSubtitleFallback: true
+      });
+    }
+  });
+
   // Helper to fetch actual subtitles from YouTube
   async function fetchTranscript(videoId: string): Promise<string> {
     if (!videoId) return "";
